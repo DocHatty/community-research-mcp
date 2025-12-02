@@ -230,61 +230,62 @@ _mcp_ai_context = {
 }
 
 # Constants
-CHARACTER_LIMIT = 25000
-API_TIMEOUT = 30.0
+CHARACTER_LIMIT = 100000  # Increased from 25K to 100K to prevent truncation
+API_TIMEOUT = 60.0  # Increased from 30s to 60s for better result fetching
 MAX_RETRIES = 3
 CACHE_TTL_SECONDS = 3600  # 1 hour
 RATE_LIMIT_WINDOW = 60  # seconds
 RATE_LIMIT_MAX_CALLS = 10
 
 # Source guardrails and defaults
+# INCREASED max_results for deeper, wider coverage
 SOURCE_POLICIES: Dict[str, Dict[str, Any]] = {
     "stackoverflow": {
         "min_query_length": 10,
-        "max_results": 15,
-        "max_results_expanded": 30,
+        "max_results": 25,  # Increased from 15
+        "max_results_expanded": 50,  # Increased from 30
         "read_only": True,
     },
     "github": {
         "min_query_length": 10,
-        "max_results": 15,
-        "max_results_expanded": 30,
+        "max_results": 25,  # Increased from 15
+        "max_results_expanded": 50,  # Increased from 30
         "read_only": True,
     },
     "reddit": {
         "min_query_length": 10,
-        "max_results": 15,
-        "max_results_expanded": 30,
+        "max_results": 25,  # Increased from 15
+        "max_results_expanded": 50,  # Increased from 30
         "read_only": True,
     },
     "hackernews": {
         "min_query_length": 8,
-        "max_results": 10,
-        "max_results_expanded": 20,
+        "max_results": 20,  # Increased from 10
+        "max_results_expanded": 40,  # Increased from 20
         "read_only": True,
     },
     "lobsters": {
         "min_query_length": 8,
-        "max_results": 10,
-        "max_results_expanded": 20,
+        "max_results": 20,  # Increased from 10
+        "max_results_expanded": 40,  # Increased from 20
         "read_only": True,
     },
     "discourse": {
         "min_query_length": 10,
-        "max_results": 15,
-        "max_results_expanded": 30,
+        "max_results": 25,  # Increased from 15
+        "max_results_expanded": 50,  # Increased from 30
         "read_only": True,
     },
     "firecrawl": {
         "min_query_length": 6,
-        "max_results": 12,
-        "max_results_expanded": 25,
+        "max_results": 20,  # Increased from 12
+        "max_results_expanded": 40,  # Increased from 25
         "read_only": True,
     },
     "tavily": {
         "min_query_length": 6,
-        "max_results": 12,
-        "max_results_expanded": 25,
+        "max_results": 20,  # Increased from 12
+        "max_results_expanded": 40,  # Increased from 25
         "read_only": True,
     },
 }
@@ -659,18 +660,6 @@ def _extract_versions(text: str) -> List[str]:
     return sorted({m.group(0) for m in VERSION_PATTERN.finditer(text)})
 
 
-def _build_version_tokens(versions: List[str]) -> List[str]:
-    """Create lightweight range/filter tokens for version-aware searches."""
-    tokens: List[str] = []
-    for ver in versions:
-        tokens.extend([f"v{ver}", f"before:{ver}", f"after:{ver}", f"since {ver}"])
-        parts = ver.split(".")
-        if len(parts) >= 2:
-            major_minor = ".".join(parts[:2])
-            tokens.append(f"{major_minor}.x")
-    return tokens
-
-
 def _generate_query_variations(
     language: str, topic: str, goal: Optional[str] = None
 ) -> List[str]:
@@ -930,215 +919,171 @@ def enrich_query(
     }
 
 
-# =============================================================================
-# STREET-SMART SEARCH CONFIGURATION
-# =============================================================================
-# "Where the official documentation ends and actual street-smart solutions begin."
-#
-# These settings ensure web search APIs find REAL solutions from REAL developers:
-# - Workarounds that actually work in production
-# - "This finally worked for me" comments
-# - Battle-tested hacks and fixes
-# - The messy truth that official docs don't tell you
-
-# Community domains - where developers share what ACTUALLY works
-COMMUNITY_DOMAINS = [
-    # Q&A sites - front line of problem solving
-    "stackoverflow.com",
-    "stackexchange.com",
-    "superuser.com",
-    "serverfault.com",
-    # Forums & Discussion - raw, unfiltered experiences
-    "reddit.com",
-    "news.ycombinator.com",
-    "lobste.rs",
-    "dev.to",
-    "hashnode.dev",
-    # GitHub - real bugs, real fixes, real discussions
-    "github.com",
-    "gist.github.com",
-    # Framework communities - specialized wisdom
-    "discourse.org",
-    "community.openai.com",
-    "discuss.python.org",
-    "forum.cursor.com",
-    # Developer blogs - war stories and lessons learned
-    "medium.com",
-    "freecodecamp.org",
-    "css-tricks.com",
-    "smashingmagazine.com",
-]
-
-# Keywords that signal REAL solutions (not marketing or official docs)
-STREET_SMART_KEYWORDS = [
-    # Solution indicators
-    "workaround",
-    "fix",
-    "solved",
-    "working",
-    "finally",
-    # Community wisdom
-    "hack",
-    "trick",
-    "tip",
-    "gotcha",
-    "caveat",
-    "pitfall",
-    # Real experiences
-    "how I",
-    "finally got",
-    "figured out",
-    "turns out",
-    "the trick is",
-    "what worked",
-    "after hours",
-    # Discussion markers
-    "answered",
-    "accepted",
-    "upvoted",
-    "this helped",
-]
-
-
-def enrich_query_for_community(
-    query: str,
-    language: Optional[str] = None,
-    search_type: str = "general",
+def enrich_query_with_context(
+    language: str,
+    topic: str,
+    goal: Optional[str] = None,
+    project_context: Optional[str] = None,
+    error_context: Optional[str] = None,
+    implementation_details: Optional[str] = None,
+    chat_history_summary: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Enrich a query to find STREET-SMART solutions, not sanitized documentation.
+    Enhanced query enrichment that leverages contextual grounding provided by the LLM.
 
-    This targets the places where developers share what ACTUALLY works:
-    - Real fixes from Stack Overflow accepted answers
-    - "This finally worked for me" comments from Reddit
-    - GitHub issues where someone figured out the workaround
-    - The messy hacks that people actually use in production
+    This function uses the rich context gathered by the LLM (from examining the user's
+    codebase, error messages, and chat history) to build highly targeted search queries.
+
+    The philosophy: MCP does search, LLM does understanding. But the LLM's understanding
+    should inform HOW we search.
 
     Args:
-        query: The original search query
-        language: Optional programming language context
-        search_type: "general", "troubleshooting", "implementation", "comparison"
+        language: Programming language
+        topic: The search topic
+        goal: What the user wants to achieve
+        project_context: Summary of the project/app from examining codebase
+        error_context: Exact error message and location
+        implementation_details: How the feature is currently implemented
+        chat_history_summary: What was already discussed/tried
 
     Returns:
-        Dict with enriched queries optimized for finding real-world solutions.
+        Enhanced enrichment dict with context-aware queries
     """
-    base = f"{language} {query}".strip() if language else query.strip()
-    query_lower = query.lower()
+    # Start with the base enrichment
+    base_enrichment = enrich_query(language, topic, goal)
 
-    # Detect query intent
-    is_troubleshooting = any(
-        word in query_lower
-        for word in [
-            "error",
-            "fix",
-            "issue",
-            "problem",
-            "not working",
-            "fails",
-            "bug",
-            "broken",
-        ]
-    )
-    is_how_to = any(
-        word in query_lower
-        for word in ["how to", "how do", "how can", "way to", "best way"]
-    )
+    context_notes = []
+    additional_queries = []
+    context_terms = []
 
-    # Build street-smart query variants
-    queries = {
-        "primary": base,
-        "community_focused": None,
-        "site_restricted": None,
-        "solution_focused": None,
-    }
+    # === EXTRACT KEY TERMS FROM ERROR CONTEXT ===
+    if error_context:
+        context_notes.append("Using error context to target specific error patterns")
 
-    if is_troubleshooting or search_type == "troubleshooting":
-        # For errors - find what ACTUALLY fixed it
-        queries["community_focused"] = f"{base} workaround fix solved"
-        queries["solution_focused"] = f'{base} "finally worked" OR "this fixed"'
-        queries["site_restricted"] = f"{base} site:stackoverflow.com OR site:github.com"
-    elif is_how_to or search_type == "implementation":
-        # For implementation - find working examples, not docs
-        queries["community_focused"] = f"{base} working example implementation"
-        queries["solution_focused"] = f'{base} "here\'s how" OR "what worked"'
-        queries["site_restricted"] = f"{base} site:stackoverflow.com OR site:dev.to"
-    elif search_type == "comparison":
-        # For comparisons - find real production experience
-        queries["community_focused"] = f"{base} vs comparison real experience"
-        queries["solution_focused"] = f'{base} "we switched" OR "in production"'
-        queries["site_restricted"] = (
-            f"{base} site:reddit.com OR site:news.ycombinator.com"
+        # Extract error codes (like 0x80072EFD, E_FAIL, ECONNREFUSED, etc.)
+        error_codes = re.findall(
+            r"\b(0x[0-9A-Fa-f]+|E_[A-Z_]+|ERR_[A-Z_]+|ECONNREFUSED|ETIMEDOUT|ENOTFOUND)\b",
+            error_context,
         )
-    else:
-        # General - bias toward community solutions over docs
-        queries["community_focused"] = f"{base} workaround solution community"
-        queries["solution_focused"] = f'{base} "worked for me" OR fix'
-        queries["site_restricted"] = f"{base} site:stackoverflow.com OR site:reddit.com"
+        if error_codes:
+            context_terms.extend(error_codes[:2])
+            # Create a specific error code query
+            for code in error_codes[:2]:
+                additional_queries.append(f"{language} {code} fix solution")
+
+        # Extract API/function names (CamelCase or snake_case patterns)
+        api_names = re.findall(
+            r"\b([A-Z][a-z]+(?:[A-Z][a-z]+)+|[a-z]+_[a-z_]+)\b", error_context
+        )
+        # Filter to likely API names (not common words)
+        common_words = {"the", "and", "for", "with", "from", "this", "that"}
+        api_names = [
+            n for n in api_names if n.lower() not in common_words and len(n) > 5
+        ][:3]
+        if api_names:
+            context_terms.extend(api_names)
+
+    # === EXTRACT KEY TERMS FROM IMPLEMENTATION DETAILS ===
+    if implementation_details:
+        context_notes.append("Using implementation details to find relevant solutions")
+
+        # Extract library/framework names
+        lib_patterns = [
+            r"\b(WinRT|WinHttp|axios|fetch|requests|httpx|aiohttp)\b",
+            r"\b([A-Z][a-z]+(?:SDK|API|Client|Service|Handler))\b",
+            r"\b(windows-rs|tokio|async-std|react|vue|angular)\b",
+        ]
+        for pattern in lib_patterns:
+            matches = re.findall(pattern, implementation_details, re.IGNORECASE)
+            context_terms.extend(matches[:2])
+
+    # === EXTRACT CONSTRAINTS FROM CHAT HISTORY ===
+    if chat_history_summary:
+        context_notes.append("Considering chat history for constraints and preferences")
+
+        # Look for "already tried" patterns to potentially exclude
+        tried_match = re.search(
+            r"(?:tried|attempted|tested)\s+([^,.]+)",
+            chat_history_summary,
+            re.IGNORECASE,
+        )
+        if tried_match:
+            context_notes.append(f"User already tried: {tried_match.group(1)}")
+
+        # Look for preference patterns
+        if "offline" in chat_history_summary.lower():
+            context_notes.append("User prefers offline solutions")
+            additional_queries.append(f"{language} {topic} offline local")
+        if (
+            "no cloud" in chat_history_summary.lower()
+            or "privacy" in chat_history_summary.lower()
+        ):
+            context_notes.append("User prefers non-cloud solutions")
+
+    # === EXTRACT PROJECT TYPE FROM PROJECT CONTEXT ===
+    if project_context:
+        context_notes.append("Using project context for technology-specific queries")
+
+        # Identify project type/framework
+        project_frameworks = []
+        framework_patterns = [
+            (r"\b(Tauri|Electron|React Native|Flutter)\b", "desktop/mobile app"),
+            (r"\b(FastAPI|Django|Flask|Express|NestJS)\b", "web backend"),
+            (r"\b(React|Vue|Angular|Svelte)\b", "web frontend"),
+            (r"\b(Rust|Go|Python|Node\.?js|TypeScript)\b", "language"),
+        ]
+        for pattern, category in framework_patterns:
+            matches = re.findall(pattern, project_context, re.IGNORECASE)
+            if matches:
+                project_frameworks.extend(matches[:2])
+
+        if project_frameworks:
+            # Add framework-specific query
+            frameworks_str = " ".join(project_frameworks[:2])
+            additional_queries.append(f"{frameworks_str} {topic}")
+
+    # === BUILD CONTEXT-ENHANCED QUERIES ===
+    # Remove duplicates from context terms
+    context_terms = list(dict.fromkeys(context_terms))[:5]
+
+    if context_terms:
+        # Create a context-enriched primary query
+        context_enriched_query = f"{language} {' '.join(context_terms[:3])} {topic}"
+        additional_queries.insert(0, context_enriched_query)
+
+    # Merge with base expanded queries, prioritizing context-aware ones
+    all_queries = additional_queries + base_enrichment.get("expanded_queries", [])
+
+    # Deduplicate while preserving order
+    seen = set()
+    unique_queries = []
+    for q in all_queries:
+        q_normalized = " ".join(q.lower().split())
+        if q_normalized not in seen:
+            seen.add(q_normalized)
+            unique_queries.append(q)
+
+    # Build the context summary for the response
+    context_used = {
+        "has_project_context": bool(project_context),
+        "has_error_context": bool(error_context),
+        "has_implementation_details": bool(implementation_details),
+        "has_chat_history": bool(chat_history_summary),
+        "extracted_terms": context_terms,
+        "context_notes": context_notes,
+    }
 
     return {
-        "queries": queries,
-        "include_domains": COMMUNITY_DOMAINS,
-        "search_hints": {
-            "is_troubleshooting": is_troubleshooting,
-            "is_how_to": is_how_to,
-            "suggested_type": search_type,
-        },
+        "enriched_query": unique_queries[0]
+        if unique_queries
+        else base_enrichment.get("enriched_query"),
+        "expanded_queries": unique_queries[:7],
+        "sub_queries": base_enrichment.get("sub_queries", []),
+        "notes": base_enrichment.get("notes", []) + context_notes,
+        "assumptions": base_enrichment.get("assumptions", []),
+        "versions": base_enrichment.get("versions", []),
+        "context_used": context_used,
     }
-
-
-def get_community_query(query: str, language: Optional[str] = None) -> str:
-    """
-    Transform a query to find STREET-SMART solutions.
-
-    This is the simple interface used by web search APIs (Brave, Serper, Tavily, Firecrawl).
-    Adds terms that bias results toward real-world fixes over official documentation.
-
-    The goal: Find the Reddit comment, Stack Overflow answer, or GitHub issue
-    where someone says "I finally figured it out..." or "here's what actually worked"
-
-    Args:
-        query: Original search query
-        language: Optional programming language
-
-    Returns:
-        Enriched query string targeting community-sourced solutions.
-    """
-    base = f"{language} {query}".strip() if language else query.strip()
-    query_lower = query.lower()
-
-    # Check if query already has street-smart terms
-    has_solution_terms = any(
-        term in query_lower
-        for term in [
-            "workaround",
-            "solution",
-            "fix",
-            "solved",
-            "hack",
-            "trick",
-            "worked",
-        ]
-    )
-
-    if has_solution_terms:
-        # Query already targets solutions, don't over-enrich
-        return base
-
-    # Add street-smart terms based on query type
-    if any(
-        word in query_lower
-        for word in ["error", "exception", "fails", "not working", "broken"]
-    ):
-        # Error queries - find actual fixes and workarounds
-        return f"{base} workaround fix solved"
-    elif any(
-        word in query_lower for word in ["how to", "how do", "implement", "create"]
-    ):
-        # How-to queries - find working examples from the community
-        return f"{base} working example solution"
-    else:
-        # General queries - bias toward community content over official docs
-        return f"{base} community workaround solution"
 
 
 def detect_conflicts_from_findings(
@@ -1483,27 +1428,28 @@ def get_available_api_groups() -> Dict[str, List[str]]:
         "tertiary": [],  # Supplementary - used for query 3
     }
 
-    # Primary group: Core community sources (free, reliable)
+    # Primary group: Core community sources + web search APIs (always used for max coverage)
     if source_config.get("stackoverflow", {}).get("enabled", True):
         available_groups["primary"].append("stackoverflow")
     if source_config.get("github", {}).get("enabled", True):
         available_groups["primary"].append("github")
     if source_config.get("hackernews", {}).get("enabled", True):
         available_groups["primary"].append("hackernews")
-
-    # Secondary group: Web search APIs (paid, high quality)
+    # Web search APIs moved to primary for wider coverage
     if BRAVE_SEARCH_API_KEY and source_config.get("brave", {}).get("enabled", True):
-        available_groups["secondary"].append("brave")
+        available_groups["primary"].append("brave")
+    if SERPER_API_KEY and source_config.get("serper", {}).get("enabled", True):
+        available_groups["primary"].append("serper")
+
+    # Secondary group: Additional web search + community sources
     if TAVILY_API_KEY and source_config.get("tavily", {}).get("enabled", True):
         available_groups["secondary"].append("tavily")
-    if SERPER_API_KEY and source_config.get("serper", {}).get("enabled", True):
-        available_groups["secondary"].append("serper")
-
-    # Tertiary group: Additional sources
     if source_config.get("reddit", {}).get("enabled", True):
-        available_groups["tertiary"].append("reddit")
+        available_groups["secondary"].append("reddit")
     if source_config.get("lobsters", {}).get("enabled", True):
-        available_groups["tertiary"].append("lobsters")
+        available_groups["secondary"].append("lobsters")
+
+    # Tertiary group: Supplementary sources
     if source_config.get("discourse", {}).get("enabled", True):
         available_groups["tertiary"].append("discourse")
     if FIRECRAWL_API_KEY and source_config.get("firecrawl", {}).get("enabled", True):
@@ -1979,6 +1925,7 @@ def _estimate_recency_days(item: Dict[str, Any]) -> Optional[float]:
 
 
 def _token_overlap_score(text: str, query: str) -> float:
+    """Calculate token overlap with emphasis on technical/specific terms."""
     q_tokens = {t for t in re.findall(r"[a-zA-Z0-9]+", query.lower()) if len(t) > 2}
     if not q_tokens:
         return 0.0
@@ -1987,6 +1934,264 @@ def _token_overlap_score(text: str, query: str) -> float:
         return 0.0
     overlap = len(q_tokens & words)
     return min(1.0, overlap / len(q_tokens))
+
+
+def _get_core_technical_terms(text: str) -> set:
+    """
+    Extract core technical terms that MUST match for relevance.
+    These are specific technology names, libraries, APIs that define what the query is about.
+    """
+    text_lower = text.lower()
+
+    # Known technical terms - these are high-signal words
+    technical_patterns = [
+        # APIs and services
+        r"\b(whisper|deepgram|assemblyai|openai|gemini|anthropic|gpt|claude)\b",
+        r"\b(aws|azure|gcp|google\s*cloud|firebase|supabase)\b",
+        # Frameworks and libraries
+        r"\b(fastapi|django|flask|express|nextjs|react|vue|angular|svelte)\b",
+        r"\b(pytorch|tensorflow|keras|pandas|numpy|scipy)\b",
+        r"\b(celery|redis|rabbitmq|kafka|postgresql|mongodb|mysql)\b",
+        # Concepts that are specific
+        r"\b(transcription|speech.to.text|stt|asr|tts|text.to.speech)\b",
+        r"\b(websocket|graphql|rest\s*api|grpc|oauth|jwt)\b",
+        r"\b(docker|kubernetes|k8s|terraform|ansible)\b",
+        # File formats and protocols
+        r"\b(wav|mp3|flac|opus|webm|json|yaml|toml)\b",
+    ]
+
+    terms = set()
+    for pattern in technical_patterns:
+        matches = re.findall(pattern, text_lower)
+        terms.update(m if isinstance(m, str) else m[0] for m in matches)
+
+    # Also extract CamelCase and snake_case identifiers (likely library/class names)
+    camel_case = re.findall(r"\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\b", text)
+    terms.update(t.lower() for t in camel_case if len(t) > 4)
+
+    snake_case = re.findall(r"\b([a-z]+_[a-z_]+)\b", text_lower)
+    terms.update(t for t in snake_case if len(t) > 5)
+
+    return terms
+
+
+def _calculate_relevance_score(
+    item_text: str, query: str, query_core_terms: set, query_tokens: set
+) -> tuple[float, bool]:
+    """
+    Calculate relevance score with core term matching.
+
+    Returns:
+        (relevance_score, has_core_match) - score 0-1, and whether core terms matched
+    """
+    item_lower = item_text.lower()
+    item_tokens = {t for t in re.findall(r"[a-zA-Z0-9_]+", item_lower) if len(t) > 2}
+
+    if not item_tokens or not query_tokens:
+        return 0.0, False
+
+    # Check core technical term overlap (MUST have at least one)
+    item_core_terms = _get_core_technical_terms(item_text)
+    core_overlap = query_core_terms & item_core_terms
+    has_core_match = len(core_overlap) > 0
+
+    # Basic token overlap
+    token_overlap = len(query_tokens & item_tokens)
+    base_relevance = token_overlap / len(query_tokens) if query_tokens else 0
+
+    # Boost for core term matches (these are the important technical terms)
+    if query_core_terms:
+        core_match_ratio = len(core_overlap) / len(query_core_terms)
+        # Core terms are worth 60% of the score, general tokens 40%
+        relevance = (core_match_ratio * 0.6) + (base_relevance * 0.4)
+    else:
+        relevance = base_relevance
+
+    return min(1.0, relevance), has_core_match
+
+
+def filter_irrelevant_results(
+    results: List[Dict[str, Any]],
+    topic: str,
+    language: str,
+    min_relevance: float = 0.15,
+) -> List[Dict[str, Any]]:
+    """
+    Light filtering of search results - trust the LLM to separate noise.
+
+    This is RELAXED filtering that only removes obviously irrelevant results:
+    1. Results with some token overlap OR core term match pass through
+    2. Low threshold (15%) allows borderline results - LLM can judge
+    3. Community validation from any source helps results pass
+
+    The LLM is capable of ignoring noise, so we prioritize not "strangling
+    results of oxygen" over aggressive pre-filtering.
+
+    Args:
+        results: List of search result items
+        topic: The search topic
+        language: Programming language context
+        min_relevance: Minimum relevance score (0-1). Default 0.15 (15%) - permissive
+
+    Returns:
+        Filtered list with potentially relevant results for LLM to evaluate
+    """
+    if not results:
+        return results
+
+    # MINIMAL stop words - ONLY pure grammar words with zero technical meaning
+    # DO NOT add technical terms, programming languages, or domain words here!
+    # The previous list was way too aggressive and filtered out important search terms
+    common_words = {
+        # Articles only
+        "the",
+        "a",
+        "an",
+        # Pure conjunctions
+        "and",
+        "or",
+        "but",
+        # Basic prepositions
+        "in",
+        "on",
+        "at",
+        "to",
+        "for",
+        "of",
+        "with",
+        "by",
+        "from",
+        "as",
+        # Be verbs (these truly add no search value)
+        "is",
+        "was",
+        "are",
+        "were",
+        "been",
+        "be",
+        "am",
+        # Basic pronouns
+        "i",
+        "you",
+        "we",
+        "they",
+        "it",
+        "my",
+        "your",
+        "our",
+        "their",
+        "its",
+        "this",
+        "that",
+        "these",
+        "those",
+        # Question words (keep for context but low weight)
+        "how",
+        "what",
+        "when",
+        "where",
+        "why",
+        "which",
+        "who",
+    }
+    # NOTE: We intentionally DO NOT exclude:
+    # - Programming languages (python, javascript, rust, go) - CRITICAL for filtering
+    # - Technical verbs (use, create, build, improve) - indicate intent
+    # - Domain terms (api, method, code, app) - these ARE the search terms
+    # - Solution-oriented words (fix, solution, error) - indicate what user needs
+
+    # Build query context
+    query_text = f"{language} {topic}"
+    query_core_terms = _get_core_technical_terms(query_text)
+    query_tokens = {
+        t
+        for t in re.findall(r"[a-zA-Z0-9_]+", query_text.lower())
+        if len(t) > 2 and t not in common_words
+    }
+
+    if not query_tokens and not query_core_terms:
+        # If no meaningful query tokens, can't filter - return all
+        return results
+
+    filtered = []
+    scored_results = []
+
+    for item in results:
+        # Build text to check from title and content
+        title = item.get("title") or ""
+        content = item.get("full_content") or item.get("snippet") or ""
+        item_text = f"{title} {content}"
+
+        if not item_text.strip():
+            continue
+
+        # Calculate relevance using the new smart scoring
+        relevance, has_core_match = _calculate_relevance_score(
+            item_text, query_text, query_core_terms, query_tokens
+        )
+
+        # Store for potential fallback
+        scored_results.append((item, relevance, has_core_match))
+
+        # RELAXED FILTERING CRITERIA - let LLM handle noise:
+        # 1. Any core technical term match passes (even with low relevance)
+        # 2. Low general relevance threshold (15%) - borderline results OK
+        # 3. Any community validation helps (upvotes, stars, etc.)
+
+        has_community_signal = (
+            item.get("score", 0) or 0
+        ) > 10  # Low bar for community validation
+
+        passes_filter = (
+            has_core_match  # Any core term match passes
+            or (relevance >= min_relevance)  # Low threshold (15%)
+            or has_community_signal  # Community found it useful
+            or (
+                relevance >= 0.05
+                and item.get("source") in ("stackoverflow", "github", "reddit")
+            )  # Trusted sources get extra leniency
+        )
+
+        if passes_filter:
+            # Add relevance metadata for transparency and ranking
+            item["_relevance_score"] = round(relevance, 3)
+            item["_has_core_match"] = has_core_match
+            filtered.append(item)
+
+    # If filtering was too aggressive, return top results that at least have SOME relevance
+    if not filtered and scored_results:
+        # Sort by (has_core_match, relevance) - prioritize core matches
+        scored_results.sort(key=lambda x: (x[2], x[1]), reverse=True)
+
+        # Only return fallbacks if they have minimal relevance
+        fallback = []
+        for item, relevance, has_core_match in scored_results[:5]:
+            if relevance > 0.1 or has_core_match:  # Must have SOMETHING relevant
+                item["_relevance_score"] = round(relevance, 3)
+                item["_has_core_match"] = has_core_match
+                item["_fallback"] = True
+                fallback.append(item)
+
+        if fallback:
+            return fallback
+
+        # Absolute last resort - return top 3 by community score, but mark as low relevance
+        by_score = sorted(
+            results, key=lambda x: (x.get("score", 0) or 0), reverse=True
+        )[:3]
+        for item in by_score:
+            item["_relevance_score"] = 0.0
+            item["_fallback"] = True
+            item["_low_relevance_warning"] = True
+        return by_score
+
+    # Sort filtered results by relevance score
+    filtered.sort(
+        key=lambda x: (x.get("_has_core_match", False), x.get("_relevance_score", 0)),
+        reverse=True,
+    )
+
+    return filtered
 
 
 def normalize_item_for_scoring(
@@ -2209,18 +2414,6 @@ def build_all_star_index(
     }
 
 
-def _index_results_by_url(results: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
-    """Create a quick lookup for search items by URL."""
-    lookup: Dict[str, Dict[str, Any]] = {}
-    for source, items in _result_only_sources(results).items():
-        for item in items:
-            url = item.get("url") or item.get("link")
-            if not url:
-                continue
-            lookup[url] = {**item, "source": source}
-    return lookup
-
-
 def filter_results_by_domain(
     results: Dict[str, Any], language: str, query: str
 ) -> Dict[str, Any]:
@@ -2268,6 +2461,143 @@ def filter_results_by_domain(
         filtered[source] = kept
     filtered["_meta"] = results.get("_meta", {})
     return filtered
+
+
+def _generate_niche_topic_suggestions(
+    topic: str, language: str, goal: Optional[str] = None
+) -> List[Dict[str, str]]:
+    """
+    Generate helpful suggestions when a topic appears to be niche/sparse.
+
+    This helps users find related content when their specific query
+    doesn't have much community coverage.
+    """
+    suggestions = []
+    topic_lower = topic.lower()
+
+    # Identify the core technologies mentioned
+    known_technologies = {
+        # API proxies/gateways
+        "openrouter": {
+            "category": "api_proxy",
+            "alternatives": ["direct API calls", "LiteLLM", "portkey"],
+        },
+        "litellm": {
+            "category": "api_proxy",
+            "alternatives": ["OpenRouter", "direct API calls"],
+        },
+        # AI/ML APIs
+        "gemini": {
+            "category": "ai_api",
+            "base": "Google AI",
+            "alternatives": ["OpenAI Whisper", "Claude", "GPT-4"],
+        },
+        "whisper": {
+            "category": "transcription",
+            "base": "OpenAI",
+            "alternatives": ["Deepgram", "AssemblyAI", "Google Speech"],
+        },
+        "deepgram": {
+            "category": "transcription",
+            "alternatives": ["Whisper", "AssemblyAI", "Google Speech"],
+        },
+        "assemblyai": {
+            "category": "transcription",
+            "alternatives": ["Whisper", "Deepgram", "Google Speech"],
+        },
+        # Transcription/Audio
+        "transcription": {
+            "category": "audio",
+            "related": ["speech-to-text", "ASR", "voice recognition"],
+        },
+        "speech-to-text": {
+            "category": "audio",
+            "related": ["transcription", "ASR", "Whisper"],
+        },
+        "stt": {
+            "category": "audio",
+            "related": ["transcription", "speech-to-text", "ASR"],
+        },
+    }
+
+    detected_tech = []
+    for tech, info in known_technologies.items():
+        if tech in topic_lower:
+            detected_tech.append((tech, info))
+
+    # Generate suggestions based on detected technologies
+    for tech, info in detected_tech:
+        if "alternatives" in info:
+            suggestions.append(
+                {
+                    "type": "alternatives",
+                    "message": f"Try searching for alternatives to {tech}",
+                    "searches": info["alternatives"],
+                }
+            )
+        if "base" in info:
+            suggestions.append(
+                {
+                    "type": "base_technology",
+                    "message": f"Search for the underlying technology: {info['base']}",
+                    "search": f"{language} {info['base']} {info.get('category', '')}",
+                }
+            )
+        if "related" in info:
+            suggestions.append(
+                {
+                    "type": "related_terms",
+                    "message": f"Try related search terms",
+                    "searches": info["related"],
+                }
+            )
+
+    # Add general suggestions
+    if goal:
+        suggestions.append(
+            {
+                "type": "goal_focused",
+                "message": "Search by your goal instead of specific tools",
+                "search": f"{language} {goal}",
+            }
+        )
+
+    # Suggest breaking down compound queries
+    if " " in topic and len(topic.split()) > 3:
+        parts = topic.split()
+        suggestions.append(
+            {
+                "type": "decompose",
+                "message": "Try searching for components separately",
+                "searches": [
+                    f"{language} {' '.join(parts[:2])}",
+                    f"{language} {' '.join(parts[-2:])}",
+                ],
+            }
+        )
+
+    return suggestions
+
+
+def _extract_base_technology(topic: str) -> str:
+    """
+    Extract the base/underlying technology from a niche topic.
+
+    E.g., "OpenRouter Gemini transcription" -> "Gemini audio API" or "speech-to-text"
+    """
+    topic_lower = topic.lower()
+
+    # Map niche combinations to base technologies
+    if "openrouter" in topic_lower and "gemini" in topic_lower:
+        return "Gemini API audio input"
+    if "transcription" in topic_lower or "speech" in topic_lower:
+        return "speech-to-text API comparison"
+    if "whisper" in topic_lower:
+        return "OpenAI Whisper API"
+
+    # Default: return first 3 significant words
+    words = [w for w in topic.split() if len(w) > 3]
+    return " ".join(words[:3]) if words else topic
 
 
 def get_manual_evidence(topic: str) -> List[Dict[str, Any]]:
@@ -2329,178 +2659,164 @@ def _is_preferred_domain(domain: str) -> bool:
 
 def _extract_issue_from_content(title: str, snippet: str, query: str) -> str:
     """
-    Extract a meaningful issue/question description from content.
+    Extract a concise issue/problem statement from content.
 
-    Prioritizes actual problem statements over generic title repetition.
+    Keep it simple - clean the data and return it. Let the LLM synthesize.
     """
-    # Clean HTML from snippet first
+    # Clean HTML from snippet
     clean_snippet = re.sub(r"<[^>]+>", " ", snippet)
-    clean_snippet = re.sub(r"&\w+;", " ", clean_snippet)  # HTML entities
+    clean_snippet = re.sub(r"&\w+;", " ", clean_snippet)
     clean_snippet = re.sub(r"\s+", " ", clean_snippet).strip()
 
-    content = f"{title} {clean_snippet}".lower()
-
-    # HIGH PRIORITY: Direct question patterns (what the user is actually asking)
-    question_patterns = [
-        r"(?:how (?:do|can|to|would) (?:i|you|we))\s+([^.!?\n]{15,120})",
-        r"(?:what(?:'s| is) the (?:best|proper|correct|right) (?:way|method|approach) to)\s+([^.!?\n]{15,100})",
-        r"(?:is there (?:a|any) (?:way|method|library|tool) to)\s+([^.!?\n]{15,100})",
-        r"(?:why (?:is|does|doesn't|won't|can't))\s+([^.!?\n]{15,100})",
-        r"(?:what (?:is|are|causes?))\s+([^.!?\n]{15,100})",
-    ]
-
-    for pattern in question_patterns:
-        match = re.search(pattern, content, re.IGNORECASE)
-        if match:
-            issue = match.group(0).strip()  # Include the question word
-            return _clean_extracted_text(issue, 150)
-
-    # MEDIUM PRIORITY: Problem/error patterns
-    problem_patterns = [
-        r"(?:getting|receiving|seeing|encountering)\s+(?:an?\s+)?(?:error|exception|warning)[:\s]+([^.!?\n]{15,100})",
-        r"(?:error|exception|traceback)[:\s]+([^.!?\n]{20,100})",
-        r"(?:can'?t|cannot|unable to|doesn'?t work|won'?t|failing to)\s+([^.!?\n]{15,100})",
-        r"(?:problem|issue|trouble|difficulty)\s+(?:with|when|while)\s+([^.!?\n]{15,100})",
-        r"(?:not working|broken|fails?|crashing)\s+(?:when|while|on|for)?\s*([^.!?\n]{10,100})",
-    ]
-
-    for pattern in problem_patterns:
-        match = re.search(pattern, content, re.IGNORECASE)
-        if match:
-            issue = match.group(1).strip()
-            if len(issue) > 15:
-                return _clean_extracted_text(issue, 150)
-
-    # LOW PRIORITY: Title is a question - use it but clean it up
-    title_lower = title.lower().strip()
-    if title_lower.startswith(
-        ("how ", "what ", "why ", "when ", "where ", "is ", "can ", "does ")
-    ):
-        clean_title = re.sub(
-            r"\s*[-|·:]\s*(Stack Overflow|GitHub|Reddit|Medium|DEV|Brave|r/).*$",
-            "",
-            title,
-            flags=re.IGNORECASE,
-        )
-        return _clean_extracted_text(clean_title, 120)
-
-    # FALLBACK: First meaningful sentence that isn't just metadata
-    sentences = re.split(r"[.!?]\s+", clean_snippet)
-    for sentence in sentences[:3]:
-        sentence = sentence.strip()
-        # Skip sentences that are just lists, code output, or too short
-        if (
-            len(sentence) > 30
-            and len(sentence) < 200
-            and not sentence.startswith(("```", "|", "-", "*", "#"))
-            and not re.match(r"^\d+[\s\-:]", sentence)
-        ):
-            return _clean_extracted_text(sentence, 150)
-
-    # Last resort: cleaned title
+    # Clean the title
     clean_title = re.sub(
-        r"\s*[-|·:]\s*(Stack Overflow|GitHub|Reddit|Medium|DEV|Brave).*$",
+        r"\s*[-|·:]\s*(Stack Overflow|GitHub|Reddit|Medium|DEV|Brave|r/|HackerNews).*$",
         "",
         title,
         flags=re.IGNORECASE,
+    ).strip()
+
+    # If title looks like a question, use it
+    title_lower = clean_title.lower()
+    if title_lower.startswith(
+        ("how ", "what ", "why ", "when ", "where ", "is ", "can ", "does ", "should ")
+    ):
+        return _clean_extracted_text(clean_title, 150)
+
+    # Otherwise, try to find a question or problem in the snippet
+    content = clean_snippet.lower()
+
+    # Look for question patterns
+    question_match = re.search(
+        r"((?:how|what|why|when|where|is there|can i|does)\s+[^.!?\n]{10,120}[.!?]?)",
+        content,
+        re.IGNORECASE,
     )
-    return _clean_extracted_text(clean_title, 100) if clean_title.strip() else ""
+    if question_match:
+        return _clean_extracted_text(question_match.group(1), 150)
+
+    # Look for problem/error statements
+    problem_match = re.search(
+        r"((?:error|issue|problem|can'?t|cannot|unable|doesn'?t work|failing)[^.!?\n]{10,100})",
+        content,
+        re.IGNORECASE,
+    )
+    if problem_match:
+        return _clean_extracted_text(problem_match.group(1), 150)
+
+    # Fallback: return cleaned title
+    return _clean_extracted_text(clean_title, 120)
 
 
 def _extract_solution_from_content(snippet: str, title: str, source: str = "") -> str:
     """
-    Extract a meaningful solution from content.
+    Extract solution content from snippet.
 
-    Prioritizes actual solution descriptions, recommendations, and working code
-    over raw output or generic text.
+    Simple approach: clean the data, avoid duplicating the title, return raw content.
+    Let the LLM do the smart synthesis.
     """
     # Clean HTML
     clean_snippet = re.sub(r"<[^>]+>", " ", snippet)
     clean_snippet = re.sub(r"&\w+;", " ", clean_snippet)
     clean_snippet = re.sub(r"\s+", " ", clean_snippet).strip()
 
-    # HIGH PRIORITY: Explicit solution statements
-    solution_patterns = [
-        r"(?:the )?(?:solution|fix|answer|trick|key)\s+(?:is|was|would be)[:\s]+([^.!?\n]{25,250})",
-        r"(?:solved|fixed|resolved)\s+(?:it\s+)?(?:by|with|using)[:\s]+([^.!?\n]{20,200})",
-        r"(?:you (?:can|should|need to|could)|try|just)\s+(?:use|add|set|change|replace|install|run|call)[:\s]+([^.!?\n]{15,200})",
-        r"(?:this worked|finally got it|figured it out)[:\s]*([^.!?\n]{20,200})",
-        r"(?:the (?:best|recommended|proper|correct) (?:way|approach|method|solution))\s+(?:is|would be)[:\s]+([^.!?\n]{20,200})",
-        r"(?:i (?:recommend|suggest|prefer)|we use|use)\s+([^.!?\n]{15,150})",
-    ]
+    # Clean title for comparison
+    clean_title = (
+        re.sub(
+            r"\s*[-|·:]\s*(Stack Overflow|GitHub|Reddit|Medium|DEV|Brave|r/).*$",
+            "",
+            title,
+            flags=re.IGNORECASE,
+        )
+        .strip()
+        .lower()
+    )
 
-    for pattern in solution_patterns:
-        match = re.search(pattern, clean_snippet, re.IGNORECASE)
-        if match:
-            solution = match.group(1).strip()
-            if len(solution) > 20:
-                return _clean_extracted_text(solution, 300)
+    # CRITICAL: Don't return content that's just the title repeated
+    snippet_lower = clean_snippet.lower()
+    if _text_similarity(snippet_lower, clean_title) > 0.8:
+        # Content is too similar to title - this is the duplicate problem
+        # Return empty so we don't show garbage
+        return ""
 
-    # MEDIUM PRIORITY: Code blocks with context (actual working code)
-    # Extract code and surrounding context
+    # Look for explicit solution indicators first
+    solution_match = re.search(
+        r"(?:solution|fix|answer|worked|resolved|solved)[:\s]+([^.!?\n]{20,300})",
+        clean_snippet,
+        re.IGNORECASE,
+    )
+    if solution_match:
+        solution = solution_match.group(1).strip()
+        if not _text_similarity(solution.lower(), clean_title) > 0.7:
+            return _clean_extracted_text(solution, 350)
+
+    # Look for code blocks - these are valuable
     code_match = re.search(r"```[\w]*\n?(.*?)```", snippet, re.DOTALL)
     if code_match:
         code = code_match.group(1).strip()
-        # Get text before code as context
-        before_code = snippet[: code_match.start()].strip()
-        context_match = re.search(r"([^.!?\n]{20,100})[.!?\s]*$", before_code)
-        if context_match:
-            return f"{context_match.group(1).strip()}: {code[:200]}"
-        elif len(code) > 20:
-            return f"Code solution: {code[:250]}"
+        if len(code) > 15:
+            return _clean_extracted_text(f"Code: {code}", 400)
 
-    # Check for inline code suggestions
-    inline_code_match = re.search(
-        r"(?:use|try|run|install|add)\s+`([^`]{5,100})`", clean_snippet, re.IGNORECASE
-    )
-    if inline_code_match:
-        return f"Use: {inline_code_match.group(1)}"
+    # Look for inline code suggestions
+    inline_match = re.search(r"`([^`]{5,100})`", clean_snippet)
+    if inline_match:
+        code = inline_match.group(1)
+        # Get surrounding context
+        idx = clean_snippet.find(f"`{code}`")
+        context_start = max(0, idx - 50)
+        context = clean_snippet[context_start : idx + len(code) + 60].strip()
+        if not _text_similarity(context.lower(), clean_title) > 0.7:
+            return _clean_extracted_text(context, 300)
 
-    # MEDIUM PRIORITY: Library/tool recommendations
-    rec_patterns = [
-        r"(?:check out|look at|try|use|consider)\s+([A-Z][a-zA-Z0-9_-]+(?:\s+[a-zA-Z0-9_-]+)?)\s*[-–—:,]?\s*([^.!?\n]{10,100})?",
-        r"([A-Z][a-zA-Z0-9_-]+)\s+(?:is|was|works?|does)\s+([^.!?\n]{15,150})",
-    ]
-
-    for pattern in rec_patterns:
-        match = re.search(pattern, clean_snippet)
-        if match:
-            tool = match.group(1)
-            desc = match.group(2) if match.lastindex >= 2 and match.group(2) else ""
-            # Avoid matching generic words
-            if tool.lower() not in (
-                "the",
-                "this",
-                "that",
-                "it",
-                "i",
-                "we",
-                "you",
-                "my",
-                "a",
-                "an",
-            ):
-                result = f"{tool}: {desc}" if desc else tool
-                if len(result) > 15:
-                    return _clean_extracted_text(result, 200)
-
-    # LOW PRIORITY: First substantive sentence that sounds like advice/info
+    # Fallback: return first substantial part of snippet that isn't the title
     sentences = re.split(r"[.!?]\s+", clean_snippet)
     for sentence in sentences:
         sentence = sentence.strip()
-        # Skip short, code-like, or self-referential sentences
         if (
-            len(sentence) > 40
-            and len(sentence) < 300
-            and not sentence.startswith(("I ", "We ", "My ", "```", "|", "-"))
-            and not re.match(r"^[\d\s\-\|]+$", sentence)
-        ):  # Skip tables/output
-            return _clean_extracted_text(sentence, 300)
+            len(sentence) > 30
+            and not _text_similarity(sentence.lower(), clean_title) > 0.7
+        ):
+            return _clean_extracted_text(sentence, 350)
 
-    # Last resort
-    if len(clean_snippet) > 50:
-        return _clean_extracted_text(clean_snippet, 250)
+    # If snippet is substantial and different from title, return it
+    if (
+        len(clean_snippet) > 40
+        and not _text_similarity(snippet_lower, clean_title) > 0.7
+    ):
+        return _clean_extracted_text(clean_snippet, 350)
+
+    # Nothing useful found
     return ""
+
+
+def _text_similarity(text1: str, text2: str) -> float:
+    """
+    Simple text similarity check to detect duplicate content.
+    Returns 0-1 where 1 is identical.
+    """
+    if not text1 or not text2:
+        return 0.0
+
+    # Normalize
+    t1 = re.sub(r"[^\w\s]", "", text1.lower()).split()
+    t2 = re.sub(r"[^\w\s]", "", text2.lower()).split()
+
+    if not t1 or not t2:
+        return 0.0
+
+    # Check if one is substring of other
+    t1_str = " ".join(t1)
+    t2_str = " ".join(t2)
+    if t1_str in t2_str or t2_str in t1_str:
+        return 0.9
+
+    # Token overlap
+    set1, set2 = set(t1), set(t2)
+    if not set1 or not set2:
+        return 0.0
+
+    overlap = len(set1 & set2)
+    return overlap / max(len(set1), len(set2))
 
 
 def _clean_extracted_text(text: str, max_length: int) -> str:
@@ -2522,6 +2838,52 @@ def _clean_extracted_text(text: str, max_length: int) -> str:
         if not text.endswith((".", "!", "?")):
             text = text.rstrip(" ,;:-") + "..."
     return text.strip()
+
+
+def _truncate_at_sentence(text: str, max_length: int) -> str:
+    """Truncate text at a sentence boundary, up to max_length characters.
+
+    Attempts to cut at the end of a sentence (., !, ?) for cleaner output.
+    Falls back to word boundary if no sentence end is found.
+    """
+    if not text:
+        return ""
+
+    text = text.strip()
+
+    # If already short enough, return as-is
+    if len(text) <= max_length:
+        return text
+
+    # Look for sentence boundaries within max_length
+    truncated = text[:max_length]
+
+    # Find the last sentence-ending punctuation
+    last_period = truncated.rfind(". ")
+    last_exclaim = truncated.rfind("! ")
+    last_question = truncated.rfind("? ")
+
+    # Also check for sentence end at the very end of truncated text
+    if truncated.endswith("."):
+        last_period = max(last_period, len(truncated) - 1)
+    if truncated.endswith("!"):
+        last_exclaim = max(last_exclaim, len(truncated) - 1)
+    if truncated.endswith("?"):
+        last_question = max(last_question, len(truncated) - 1)
+
+    # Find the best cut point (latest sentence boundary)
+    cut_point = max(last_period, last_exclaim, last_question)
+
+    # Only use sentence boundary if it's not too early (at least 40% of max_length)
+    if cut_point > max_length * 0.4:
+        return text[: cut_point + 1].strip()
+
+    # Fall back to word boundary
+    truncated = text[:max_length].rsplit(" ", 1)[0]
+    if not truncated.endswith((".", "!", "?")):
+        truncated = truncated.rstrip(" ,;:-") + "..."
+
+    return truncated.strip()
 
 
 def _extract_code_block(snippet: str, answer_body: str = "") -> str:
@@ -3564,7 +3926,13 @@ def render_masterclass_markdown(
 
             card.append("")
 
-            # Problem if meaningful (now that we removed "Related to:" prefix)
+            # Get raw snippet for fallback
+            raw_snippet = f.get("snippet", "") or f.get("content", "") or ""
+            raw_snippet_clean = re.sub(r"<[^>]+>", " ", raw_snippet)
+            raw_snippet_clean = re.sub(r"&\w+;", " ", raw_snippet_clean)
+            raw_snippet_clean = re.sub(r"\s+", " ", raw_snippet_clean).strip()
+
+            # Problem/Issue - show if meaningful and different from title
             issue = f.get("issue", "")
             if issue and issue != "Not specified" and len(issue) > 15:
                 clean_issue = re.sub(r"<[^>]+>", "", issue.replace("\\n", " "))
@@ -3572,21 +3940,37 @@ def render_masterclass_markdown(
                 # Only show if not just repeating the title
                 if (
                     clean_issue
-                    and clean_issue.lower() != title.lower()[: len(clean_issue)]
+                    and _text_similarity(clean_issue.lower(), title.lower()) < 0.7
                 ):
                     card.append(f"**Issue:** {clean_issue}")
                     card.append("")
 
-            # Solution
+            # Solution - with fallback to raw snippet
             solution = f.get("solution", "")
+            has_solution = False
             if solution:
                 clean_sol = solution.replace("\\n", "\n").replace("&#x27;", "'")
                 clean_sol = re.sub(r"<[^>]+>", "", clean_sol)
                 clean_sol = re.sub(r"\s+", " ", clean_sol).strip()
-                clean_sol = _truncate_at_sentence(clean_sol, 300)
-                if clean_sol:
-                    card.append(f"**Solution:** {clean_sol}")
-                    card.append("")
+                # Check it's not duplicate of title
+                if (
+                    clean_sol
+                    and _text_similarity(clean_sol.lower(), title.lower()) < 0.7
+                ):
+                    clean_sol = _truncate_at_sentence(clean_sol, 350)
+                    if clean_sol and len(clean_sol) > 20:
+                        card.append(f"**Solution:** {clean_sol}")
+                        card.append("")
+                        has_solution = True
+
+            # If no solution extracted, show raw snippet as content (let LLM process it)
+            if not has_solution and raw_snippet_clean and len(raw_snippet_clean) > 30:
+                # Make sure snippet isn't just the title
+                if _text_similarity(raw_snippet_clean.lower(), title.lower()) < 0.7:
+                    snippet_display = _truncate_at_sentence(raw_snippet_clean, 400)
+                    if snippet_display and len(snippet_display) > 30:
+                        card.append(f"**Content:** {snippet_display}")
+                        card.append("")
 
             # Code in collapsible
             code = f.get("code", "")
@@ -3594,10 +3978,10 @@ def render_masterclass_markdown(
                 clean_code = code.replace("\\n", "\n").strip()
                 if "\n" in clean_code or len(clean_code) > 30:
                     lang = language.lower() if language else "text"
-                    card.append("<details><summary>📄 View Code</summary>")
+                    card.append("<details><summary>View Code</summary>")
                     card.append("")
                     card.append(f"```{lang}")
-                    card.append(clean_code[:400])
+                    card.append(clean_code[:500])
                     card.append("```")
                     card.append("</details>")
                     card.append("")
@@ -3744,7 +4128,139 @@ async def synthesize_with_multi_model(
 
 
 # ============================================================================
-# New Zen-Inspired Research Workflow Tools
+# MCP Grounding & Guidance Tools
+# ============================================================================
+
+
+@mcp.tool(
+    name="get_research_guidance",
+    annotations={
+        "title": "Get MCP Usage Guidance",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def get_research_guidance() -> str:
+    """
+    ═══════════════════════════════════════════════════════════════════════════════
+    CALL THIS TOOL FIRST when you want to use the Community Research MCP.
+    ═══════════════════════════════════════════════════════════════════════════════
+
+    This tool provides guidance on how to use the Community Research MCP effectively.
+    It lists all available tools and explains the CORRECT way to use them.
+
+    WHY THIS MATTERS:
+    - Ensures you use the user's EXACT query (not a rephrased version)
+    - Helps you pick the right tool for the task
+    - Prevents wasted searches with irrelevant results
+
+    Returns:
+        Comprehensive guidance on MCP tools and usage patterns.
+    """
+    guidance = {
+        "mcp_name": "Community Research MCP",
+        "purpose": "Find REAL solutions from developers who've fought through your exact problem. Stack Overflow answers, GitHub issues, Reddit discussions - the street-smart wisdom that official docs don't tell you.",
+        "CRITICAL_RULES": {
+            "rule_1_EXACT_QUERY": {
+                "description": "ALWAYS use the user's EXACT words in the 'topic' field",
+                "why": "Rephrasing queries causes irrelevant results. If user asks about 'audio transcription', search for 'audio transcription' - NOT 'Whisper vs Deepgram comparison'",
+                "bad_example": {
+                    "user_asked": "improve audio transcription methods in my app",
+                    "you_searched": "cloud audio transcription API best practices Whisper vs Deepgram vs AssemblyAI",
+                    "result": "GARBAGE - returns results about unrelated topics",
+                },
+                "good_example": {
+                    "user_asked": "improve audio transcription methods in my app",
+                    "you_searched": "improve audio transcription methods",
+                    "user_original_query": "improve audio transcription methods in my app",
+                    "result": "RELEVANT - returns results about improving transcription",
+                },
+            },
+            "rule_2_USER_ORIGINAL_QUERY": {
+                "description": "ALWAYS populate 'user_original_query' with the user's exact message",
+                "why": "This field is used for relevance filtering. Without it, irrelevant results slip through.",
+                "how": "Copy-paste the user's message exactly as they wrote it",
+            },
+            "rule_3_CONTEXT_FIRST": {
+                "description": "BEFORE searching, examine the user's codebase if they have one",
+                "why": "Context makes searches 10x more relevant",
+                "steps": [
+                    "1. Read their package.json/Cargo.toml/requirements.txt",
+                    "2. Look at the specific file where the issue is",
+                    "3. Get the exact error message if there is one",
+                    "4. THEN call community_search with all this context",
+                ],
+            },
+        },
+        "available_tools": {
+            "community_search": {
+                "purpose": "PRIMARY TOOL - Search Stack Overflow, GitHub, Reddit, HackerNews for solutions",
+                "when_to_use": "Most questions - this is your go-to tool",
+                "critical_params": {
+                    "topic": "The user's EXACT question/topic - DO NOT REPHRASE",
+                    "user_original_query": "REQUIRED - The user's exact message, copy-pasted",
+                    "language": "Programming language context",
+                    "goal": "What the user wants to achieve",
+                    "project_context": "Summary of what the user's project does",
+                    "error_context": "Exact error message if applicable",
+                    "implementation_details": "How the feature is currently implemented",
+                },
+                "example_call": {
+                    "language": "Python",
+                    "topic": "improve audio transcription accuracy",
+                    "user_original_query": "Help me improve audio transcription methods I'm using for cloud API in my app",
+                    "goal": "Better transcription accuracy and methods",
+                    "project_context": "Desktop app using Whisper API for voice dictation",
+                    "implementation_details": "Currently sending WAV files to OpenAI Whisper API",
+                },
+            },
+            "plan_research": {
+                "purpose": "Plan a multi-step research strategy for complex questions",
+                "when_to_use": "Complex problems needing multiple perspectives, architecture decisions, migrations",
+            },
+            "comparative_search": {
+                "purpose": "Compare two technologies/approaches (X vs Y questions)",
+                "when_to_use": "User asks 'should I use X or Y?', 'X vs Y for my use case'",
+            },
+            "validated_research": {
+                "purpose": "Deep research with validation checklist",
+                "when_to_use": "Critical decisions where you need high confidence",
+            },
+            "fetch_reddit_hot_threads": {
+                "purpose": "Get trending discussions from a subreddit",
+                "when_to_use": "Want to see what the community is currently discussing",
+            },
+            "get_diagnostics": {
+                "purpose": "Check MCP health and API status",
+                "when_to_use": "Troubleshooting, checking if APIs are working",
+            },
+        },
+        "workflow_for_user_questions": [
+            "1. READ the user's question carefully - what are they ACTUALLY asking?",
+            "2. EXAMINE their codebase if they mentioned a project (read relevant files)",
+            "3. CALL community_search with:",
+            "   - topic = user's exact words (not your interpretation)",
+            "   - user_original_query = user's full message copy-pasted",
+            "   - All context fields populated from step 2",
+            "4. SYNTHESIZE the results into a helpful answer",
+            "5. NEVER dump raw JSON to the user - create a well-structured response",
+        ],
+        "common_mistakes_to_avoid": [
+            "DON'T rephrase the user's query into something 'better'",
+            "DON'T add comparison terms (vs, compare) unless user asked for comparison",
+            "DON'T search for specific tools/libraries unless user mentioned them",
+            "DON'T skip the user_original_query field",
+            "DON'T dump raw search results to the user",
+        ],
+    }
+
+    return json.dumps(guidance, indent=2)
+
+
+# ============================================================================
+# Research Workflow Tools
 # ============================================================================
 
 
@@ -4581,76 +5097,52 @@ async def community_search(
 )
 async def _community_search_mcp_wrapper(params: CommunitySearchInput) -> str:
     """
-    Find STREET-SMART solutions from developers who've already fought through your exact problem.
+    Search Stack Overflow, GitHub, Reddit, HN for real developer solutions.
 
-    "Where the official documentation ends and actual solutions begin."
+    ╔═══════════════════════════════════════════════════════════════════════════════╗
+    ║  BEFORE CALLING THIS TOOL - UNDERSTAND THE USER'S CONTEXT                    ║
+    ╠═══════════════════════════════════════════════════════════════════════════════╣
+    ║                                                                               ║
+    ║  If the user has a codebase open, READ IT FIRST:                              ║
+    ║  - Read package.json / requirements.txt / Cargo.toml for dependencies         ║
+    ║  - Read relevant source files to understand their current approach            ║
+    ║  - Note their libraries, versions, and patterns                               ║
+    ║                                                                               ║
+    ║  If you have conversation context, USE IT:                                    ║
+    ║  - What have you already discussed?                                           ║
+    ║  - What has the user already tried?                                           ║
+    ║  - What constraints or preferences did they mention?                          ║
+    ║                                                                               ║
+    ║  Include this context in your search for 10x more relevant results:           ║
+    ║  - project_context: "FastAPI app using google-genai for transcription"        ║
+    ║  - implementation_details: "Currently calling API synchronously"              ║
+    ║  - current_setup: "Python 3.11, google-genai 0.5.0"                           ║
+    ║                                                                               ║
+    ╚═══════════════════════════════════════════════════════════════════════════════╝
 
-    NOT sanitized documentation. NOT official guides. NOT theoretical best practices.
-    The ACTUAL fixes from Stack Overflow, Reddit threads, GitHub issues, and forums.
-    The messy workarounds, the "this finally worked for me" comments, the battle-tested
-    hacks that people actually use in production.
+    ╔═══════════════════════════════════════════════════════════════════════════════╗
+    ║  MANDATORY RULES - VIOLATION WILL CAUSE THE SEARCH TO FAIL                   ║
+    ╠═══════════════════════════════════════════════════════════════════════════════╣
+    ║                                                                               ║
+    ║  1. user_original_query is REQUIRED                                           ║
+    ║     Copy-paste the user's EXACT message. No exceptions.                       ║
+    ║                                                                               ║
+    ║  2. topic MUST match user's words                                             ║
+    ║     Use the user's terminology. Do NOT rephrase or "improve" the query.       ║
+    ║     Do NOT add terms the user didn't mention (like "vs X" or "comparison").   ║
+    ║                                                                               ║
+    ║  3. ANALYZE the results you get                                               ║
+    ║     Even if results seem incomplete, SYNTHESIZE what you received.            ║
+    ║     Do NOT abandon results and search for something else entirely.            ║
+    ║                                                                               ║
+    ╚═══════════════════════════════════════════════════════════════════════════════╝
 
-    WORKFLOW GUIDANCE:
-    - For COMPLEX research (architecture decisions, comparing approaches):
-      Call plan_research FIRST to get a strategic plan, then use the queries it provides.
-    - For SIMPLE queries (specific errors, quick lookups):
-      Call this tool directly.
+    EXAMPLE - User: "improve audio transcription in my app"
 
-    WHAT THIS TOOL FINDS:
-    - Accepted Stack Overflow answers with working code
-    - GitHub issues where someone figured out the workaround
-    - Reddit threads with "I finally solved this" comments
-    - HackerNews discussions from experienced developers
-    - The gotchas and caveats that official docs don't mention
+    ✗ WRONG: topic="Whisper vs Deepgram vs AssemblyAI comparison best practices"
+    ✓ RIGHT: topic="improve audio transcription", user_original_query="improve audio transcription in my app"
 
-    WHEN TO USE DIRECTLY:
-    - "Why is this error happening?" - Find what actually fixed it
-    - "How do I implement X?" - Find working examples, not docs
-    - "What's the workaround for Y?" - Find production-tested hacks
-    - "Has anyone else hit this issue?" - Find the community's collective trauma
-
-    WHEN TO USE plan_research FIRST:
-    - Comparing multiple approaches or libraries
-    - Architecture or design decisions
-    - Migration planning spanning multiple concerns
-    - Research requiring multiple search queries
-
-    RESPONSE FORMAT:
-    Returns structured data with these key sections:
-    - findings[]: List of solutions with title, solution, evidence URL, code examples, quality score (0-100)
-    - conflicts[]: Contradicting advice or edge cases discovered
-    - recommended_path[]: Step-by-step action items
-    - quick_apply{}: Copy-paste code/commands to try immediately
-    - verification[]: How to confirm the solution worked
-    - search_meta{}: Information about sources searched, result counts, quality metrics
-
-    HOW TO INTERPRET RESULTS:
-    1. Check 'findings' for solutions - higher scores (>70) are more reliable
-    2. Review 'conflicts' to understand edge cases or debates
-    3. Follow 'recommended_path' for step-by-step implementation
-    4. Use 'quick_apply' code/commands as starting points (always review before running)
-    5. Validate with 'verification' steps after applying changes
-
-    QUALITY SCORES EXPLAINED:
-    - 80-100: Highly reliable (maintainer-backed, well-evidenced, recent)
-    - 60-79: Good quality (community-validated, has code examples)
-    - 40-59: Moderate (some evidence, may need verification)
-    - <40: Weak (limited evidence, outdated, or speculative)
-
-    Args:
-        params: CommunitySearchInput with language, topic, goal, current_setup, response_format
-
-    Example:
-        params = CommunitySearchInput(
-            language="Python",
-            topic="FastAPI background tasks with Celery Redis",
-            goal="Implement async task queue for email sending",
-            response_format="json"
-        )
-        result = await community_search(params)
-
-    Returns:
-        JSON or Markdown string with structured research findings and actionable guidance.
+    Returns findings[], conflicts[], recommended_path[], quick_apply{} for you to synthesize.
     """
     # Delegate to the main implementation that supports both MCP and direct calls
     return await community_search(params=params)
@@ -4709,7 +5201,152 @@ async def _community_search_impl(params) -> str:
             indent=2,
         )
 
-    enrichment = enrich_query(params.language, params.topic, params.goal)
+    # ═══════════════════════════════════════════════════════════════════════════
+    # CRITICAL FIX: Use user_original_query as the PRIMARY search driver
+    # ═══════════════════════════════════════════════════════════════════════════
+    # The LLM often "improves" the topic into something completely different.
+    # If user_original_query is provided, we use IT as the ground truth for:
+    # 1. Building the search query
+    # 2. Filtering irrelevant results
+    # 3. Ensuring we actually answer what the user asked
+
+    original_query = getattr(params, "user_original_query", None)
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # ENFORCEMENT: Validate that topic matches user's original query
+    # ═══════════════════════════════════════════════════════════════════════════
+    if original_query and len(original_query.strip()) > 10:
+        # Check if topic has diverged too much from the user's actual question
+        original_lower = original_query.lower()
+        topic_lower = params.topic.lower()
+
+        # Extract significant words (4+ chars, not pure grammar words)
+        # MINIMAL stop words - only exclude pure grammar, NOT technical terms!
+        common_words = {
+            "the",
+            "and",
+            "for",
+            "with",
+            "from",
+            "that",
+            "this",
+            "have",
+            "are",
+            "was",
+            "were",
+            "been",
+            "being",
+            "will",
+            "would",
+            "could",
+            "should",
+            "can",
+            "may",
+            "might",
+            "must",
+            "need",
+            "want",
+            "help",
+            "please",
+            "how",
+            "what",
+            "why",
+            "when",
+            "where",
+            "which",
+            "who",
+            "does",
+        }
+        # NOTE: DO NOT exclude technical terms like:
+        # - app, application, code, file, method - these are CONTENT words
+        # - use, using, make, improve, fix - these indicate INTENT
+        # - error, issue, problem - these are what user is searching for!
+
+        original_words = {
+            w
+            for w in re.findall(r"\w+", original_lower)
+            if len(w) >= 4 and w not in common_words
+        }
+        topic_words = {
+            w
+            for w in re.findall(r"\w+", topic_lower)
+            if len(w) >= 4 and w not in common_words
+        }
+
+        if original_words and topic_words:
+            overlap = len(original_words & topic_words)
+            overlap_ratio = overlap / max(len(original_words), 1)
+
+            # Check for completely new terms in topic that weren't in the original
+            new_terms = topic_words - original_words
+
+            # If topic has major new terms AND low overlap with original, it's a bad rephrase
+            if overlap_ratio < 0.3 and len(new_terms) >= 2:
+                return json.dumps(
+                    {
+                        "error": "TOPIC DIVERGED FROM USER'S QUESTION",
+                        "what_happened": f"You rephrased the user's query into something different.",
+                        "user_asked": original_query,
+                        "you_sent": params.topic,
+                        "new_terms_you_added": list(new_terms)[:5],
+                        "overlap_with_original": f"{int(overlap_ratio * 100)}%",
+                        "how_to_fix": [
+                            "Use the user's EXACT words in the 'topic' field",
+                            "Do NOT add terms the user didn't mention",
+                            f"Do NOT add: {', '.join(list(new_terms)[:3])}",
+                            "Copy key phrases directly from the user's message",
+                        ],
+                        "correct_topic_example": " ".join(list(original_words)[:8]),
+                    },
+                    indent=2,
+                )
+
+    if original_query and len(original_query.strip()) > 10:
+        # User's original query is our ground truth
+        # Extract the core question/topic from it
+        original_query = original_query.strip()
+        logger.info(
+            f"Using user_original_query as ground truth: {original_query[:100]}..."
+        )
+
+        # Use original query for relevance filtering later
+        relevance_anchor = original_query
+    else:
+        # Fall back to topic if no original query provided
+        relevance_anchor = params.topic
+        logger.info(
+            f"No user_original_query provided, using topic: {params.topic[:100]}..."
+        )
+
+    # === CONTEXTUAL GROUNDING: Use context fields if provided ===
+    # Check if any contextual grounding fields were provided by the LLM
+    has_context = any(
+        [
+            getattr(params, "project_context", None),
+            getattr(params, "error_context", None),
+            getattr(params, "implementation_details", None),
+            getattr(params, "chat_history_summary", None),
+        ]
+    )
+
+    if has_context:
+        # Use context-aware enrichment for more targeted searches
+        enrichment = enrich_query_with_context(
+            language=params.language,
+            topic=params.topic,
+            goal=params.goal,
+            project_context=getattr(params, "project_context", None),
+            error_context=getattr(params, "error_context", None),
+            implementation_details=getattr(params, "implementation_details", None),
+            chat_history_summary=getattr(params, "chat_history_summary", None),
+        )
+        logger.info(
+            f"Using context-aware search with {len(enrichment.get('context_used', {}).get('extracted_terms', []))} extracted terms"
+        )
+    else:
+        # Fall back to standard enrichment
+        enrichment = enrich_query(params.language, params.topic, params.goal)
+
     search_query = (
         enrichment.get("enriched_query") or f"{params.language} {params.topic}"
     )
@@ -4759,7 +5396,38 @@ async def _community_search_impl(params) -> str:
                 search_results, params.language, params.topic
             )
 
-            source_lists = _result_only_sources(filtered_results)
+            # ═══════════════════════════════════════════════════════════════════
+            # CRITICAL: Filter results by relevance to user's ACTUAL question
+            # ═══════════════════════════════════════════════════════════════════
+            # This prevents garbage results like "League game predictions" when
+            # the user asked about "audio transcription APIs"
+            relevance_filtered_results = {}
+            total_before_relevance = 0
+            total_after_relevance = 0
+
+            for source, items in _result_only_sources(filtered_results).items():
+                total_before_relevance += len(items)
+                if items:
+                    relevant_items = filter_irrelevant_results(
+                        items,
+                        relevance_anchor,  # Use the user's original query
+                        params.language,
+                        min_relevance=0.25,  # Require at least 25% relevance
+                    )
+                    relevance_filtered_results[source] = relevant_items
+                    total_after_relevance += len(relevant_items)
+                else:
+                    relevance_filtered_results[source] = []
+
+            # Preserve metadata
+            relevance_filtered_results["_meta"] = filtered_results.get("_meta", {})
+
+            logger.info(
+                f"Relevance filtering: {total_before_relevance} -> {total_after_relevance} results "
+                f"(anchor: '{relevance_anchor[:50]}...')"
+            )
+
+            source_lists = _result_only_sources(relevance_filtered_results)
             total_results = total_result_count(filtered_results)
             # SIMPLIFIED: Skip complex all-star scoring, just use simple engagement metrics
             all_star_meta = {
@@ -4784,18 +5452,71 @@ async def _community_search_impl(params) -> str:
             # SIMPLIFIED: If we have ANY results at all from ANY source, proceed
             manual = get_manual_evidence(params.topic)
 
+            # ═══════════════════════════════════════════════════════════════════
+            # NICHE TOPIC DETECTION & FALLBACK
+            # ═══════════════════════════════════════════════════════════════════
+            # Detect when primary community sources have sparse/no results
+            # and try fallback sources like Google Grounding
+
+            primary_sources = {"stackoverflow", "github", "reddit", "hackernews"}
+            primary_results = sum(
+                len(source_lists.get(src, [])) for src in primary_sources
+            )
+            is_niche_topic = (
+                primary_results < 3
+            )  # Less than 3 results from core sources
+
+            # Try Google Grounding as fallback for niche topics
+            grounding_results = []
+            if (total_results < 5 or is_niche_topic) and not manual:
+                try:
+                    from api import google_grounding_available, search_google_grounded
+
+                    if google_grounding_available and google_grounding_available():
+                        logger.info(
+                            f"Niche topic detected ({primary_results} primary results), trying Google Grounding..."
+                        )
+                        grounding_results = await search_google_grounded(
+                            params.topic,
+                            language=params.language,
+                            max_results=10,
+                            focus="community",
+                        )
+                        if grounding_results:
+                            logger.info(
+                                f"Google Grounding returned {len(grounding_results)} results"
+                            )
+                            # Add to source_lists
+                            source_lists["google_grounding"] = grounding_results
+                            total_results += len(grounding_results)
+                except Exception as e:
+                    logger.warning(f"Google Grounding fallback failed: {e}")
+
             if total_results == 0 and not manual:
+                # Generate helpful suggestions for niche topics
+                suggestions = _generate_niche_topic_suggestions(
+                    params.topic, params.language, params.goal
+                )
+
                 result = json.dumps(
                     {
                         "error": f'No results found for "{params.topic}" in {params.language}.',
+                        "diagnosis": "This appears to be a NICHE TOPIC with limited community coverage.",
                         "possible_reasons": [
-                            "Query might be too specific or unusual",
-                            "Try different keywords or expand the topic",
-                            "Community sources may not have discussions on this topic",
+                            "This is a new/bleeding-edge technology with sparse documentation",
+                            "The specific combination of tools/APIs isn't widely discussed yet",
+                            "Community sources (SO, Reddit, GitHub) don't have threads on this yet",
+                        ],
+                        "suggestions": suggestions,
+                        "alternative_searches": [
+                            f"Try searching for the underlying technology: {_extract_base_technology(params.topic)}",
+                            "Search for similar tools that solve the same problem",
+                            "Check official documentation directly",
                         ],
                         "expanded_queries": enrichment.get("expanded_queries", []),
                         "findings": [],
                         "assumptions": enrichment.get("assumptions", []),
+                        "is_niche_topic": True,
                     },
                     indent=2,
                 )
@@ -4852,6 +5573,21 @@ async def _community_search_impl(params) -> str:
                 "all_star": all_star_meta,
                 "audit_log": audit_log,
                 "shape_stats": shape_stats,
+                # === CONTEXTUAL GROUNDING METADATA ===
+                # Shows what context was provided and how it influenced the search
+                "context_used": enrichment.get(
+                    "context_used",
+                    {
+                        "has_project_context": False,
+                        "has_error_context": False,
+                        "has_implementation_details": False,
+                        "has_chat_history": False,
+                        "extracted_terms": [],
+                        "context_notes": [
+                            "No contextual grounding provided - using standard search"
+                        ],
+                    },
+                ),
             }
 
             if params.response_format == ResponseFormat.RAW:
@@ -4903,44 +5639,168 @@ async def _community_search_impl(params) -> str:
                     reverse=True,
                 )
 
-                raw_response = {
-                    "_llm_synthesis_required": {
-                        "CRITICAL": "YOU MUST SYNTHESIZE THIS DATA INTO A BEAUTIFUL RESPONSE. DO NOT DUMP RAW JSON TO THE USER.",
-                        "what_you_received": "Raw community research data from Stack Overflow, GitHub, Reddit, and other developer forums.",
-                        "what_you_must_do": "Read through ALL the results below and create a well-structured, actionable answer for the user.",
-                        "output_format": {
-                            "1_title": "Start with a clear, confident statement of the solution (or top 2-3 if there are competing approaches)",
-                            "2_solution": "Present the BEST solution with actual code examples extracted from the results. Use proper markdown code blocks.",
-                            "3_why_this_approach": "Explain WHY this is the right approach. Not just 'it works' but the reasoning: what problem does it solve, why is it better than alternatives, what makes it the community-preferred choice. Cite community consensus (e.g., '47 upvotes on Stack Overflow', 'confirmed by 3 different sources').",
-                            "4_alternatives": "Other valid approaches with their tradeoffs. Explain when you'd pick each one.",
-                            "5_gotchas": "Common pitfalls the community has identified. Things that will bite you if you don't know about them.",
-                            "6_pearls_and_hacks": "Clever tricks, shortcuts, pro tips found in the results. The 'oh that's nice' stuff. Related solutions for adjacent problems.",
-                            "7_related_insights": "Other relevant findings: debugging tips, useful tools mentioned, config tweaks, performance tricks, 'while you're at it' suggestions.",
-                            "8_your_own_knowledge": "THIS IS CRITICAL: Add your own street-smart tips, hacks, and workarounds from your training knowledge. Stuff the search might have missed. Each tip should have enough detail that the user has an 'AH OK I GET IT' moment. Don't just say what to do, explain why it matters and what problem it solves.",
-                            "9_sources": "End with 'Sources:' linking to the 2-4 most helpful discussions.",
-                        },
-                        "augment_with_your_knowledge": {
-                            "WHY": "The search results are great, but YOU know additional tricks, hacks, and workarounds that the search might have missed. Add them.",
-                            "WHAT_TO_ADD": "More street-smart tips, clever hacks, and battle-tested workarounds from your own knowledge. Each tip needs enough context that the user understands WHY it matters. Not just 'do X' but 'do X because Y happens and this saves you from Z'. The user should have a lightbulb moment.",
-                        },
-                        "style": {
-                            "tone": "Sophisticated and elegant, but easy to understand and to the point. Confident, not wishy-washy.",
-                            "formatting": "Use headers (##), bullet points, and code blocks. Make it scannable. Use generous spacing between sections for visual breathing room. Add blank lines before and after code blocks, between bullet groups, and between major sections.",
-                            "length": "As long as needed to fully answer the question. Don't truncate important details.",
-                            "code": "ALWAYS include code examples if they exist in the results. This is the most valuable part.",
-                        },
-                        "DO_NOT": [
-                            "NEVER use em dashes. Use colons, regular dashes, or restructure the sentence instead.",
-                            "DO NOT show raw JSON to the user",
-                            "DO NOT say 'here are the search results' - synthesize them",
-                            "DO NOT be wishy-washy - give a clear recommendation",
-                            "DO NOT skip code examples - extract them from the content",
-                            "DO NOT ignore high-scored answers - they represent community consensus",
-                            "DO NOT just parrot the search results - ADD YOUR OWN KNOWLEDGE to make it complete",
-                            "DO NOT cram content together - use generous whitespace and spacing for readability",
-                        ],
-                    },
+                # ================================================================
+                # CRITICAL: Build response with INSTRUCTIONS FIRST as plain text
+                # This ensures the LLM sees synthesis instructions BEFORE the data
+                # ================================================================
+
+                synthesis_preamble = """
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                                                                              ║
+║   STOP. DO NOT SEARCH AGAIN. YOU HAVE GOOD RESULTS. USE THEM NOW.           ║
+║                                                                              ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║                                                                              ║
+║   DO NOT call community_search again.                                        ║
+║   DO NOT call comparative_search.                                            ║
+║   DO NOT call any other search tool.                                         ║
+║   DO NOT say "let me search for more specific information".                  ║
+║   DO NOT say "let me search for X vs Y" or any comparison.                   ║
+║                                                                              ║
+║   The results below are SUFFICIENT. Analyze them and respond to the user.   ║
+║                                                                              ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+You have received RAW SEARCH RESULTS from community sources (Stack Overflow,
+GitHub, Reddit, HackerNews, etc.). Your job is to SYNTHESIZE these into a
+beautiful, actionable response for the user.
+
+DO NOT dump this JSON to the user. DO NOT say "here are the search results".
+You MUST read through the results and create a well-structured answer.
+
+╔══════════════════════════════════════════════════════════════════════════════╗
+║   CRITICAL: TAILOR YOUR RESPONSE TO THE USER'S SPECIFIC SITUATION           ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║                                                                              ║
+║   Before you searched, you should have examined the user's codebase:        ║
+║   - Their package.json / requirements.txt / Cargo.toml                      ║
+║   - Their existing implementation files                                      ║
+║   - Their current API usage patterns                                         ║
+║                                                                              ║
+║   USE THAT CONTEXT NOW. Your answer should reference:                        ║
+║   - Their specific libraries/frameworks (not generic advice)                 ║
+║   - How to modify THEIR code (not abstract examples)                         ║
+║   - What THEY should change based on THEIR current approach                  ║
+║                                                                              ║
+║   If you didn't examine their codebase first, acknowledge that and give     ║
+║   the best general advice, but note what info would help you be specific.   ║
+║                                                                              ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+--------------------------------------------------------------------------------
+REQUIRED OUTPUT FORMAT (BE THOROUGH - QUALITY OVER BREVITY)
+--------------------------------------------------------------------------------
+
+1. DIRECT ANSWER TO THEIR QUESTION
+   Start with a clear, confident 2-3 sentence answer. What should they do?
+   Be specific to THEIR situation if you know their setup.
+
+2. THE RECOMMENDED APPROACH (with code)
+   Present the BEST solution with actual code examples. This is the meat.
+   - Show COMPLETE, working code - not fragments
+   - If modifying their existing code, show before/after
+   - Include imports, setup, the works
+
+3. ALTERNATIVE APPROACHES (at least 2-3)
+   Don't just give one answer. Show OPTIONS with tradeoffs:
+   - Option A: [approach] - Best when [situation]. Tradeoff: [downside]
+   - Option B: [approach] - Best when [situation]. Tradeoff: [downside]
+   - Option C: [approach] - Best when [situation]. Tradeoff: [downside]
+   Include code snippets for each alternative.
+
+4. WHY THESE APPROACHES WORK
+   Explain the reasoning. Cite community evidence:
+   - "47 upvotes on Stack Overflow confirms..."
+   - "The Gemini team recommends this because..."
+   - "Multiple production users report..."
+
+5. CONFIGURATION & OPTIMIZATION OPTIONS
+   What settings/params can they tune? Show the knobs they can turn:
+   - chunk_size: smaller = more responsive, larger = less overhead
+   - sample_rate: 16000 is standard, but 44100 for music
+   - timeout: set to X for short clips, Y for long files
+   Give specific values, not just "adjust as needed".
+
+6. GOTCHAS & PITFALLS (be thorough)
+   List ALL the ways this can go wrong. Things that will bite them:
+   - Common mistakes and how to avoid them
+   - Edge cases that break things
+   - Version-specific issues
+   - Performance traps
+
+7. PERFORMANCE & QUALITY TIPS
+   Specific optimizations for speed AND quality:
+   - How to make it faster (batching, async, caching)
+   - How to make it more accurate (audio preprocessing, prompts)
+   - Benchmarks if available (X ms per second of audio)
+
+8. YOUR OWN EXPERTISE (CRITICAL - ADD VALUE!)
+   Add your own knowledge beyond the search results:
+   - Things the search might have missed
+   - Patterns you've seen work well
+   - Warnings from your training data
+   Make each tip actionable with enough context for an "AH-HA!" moment.
+
+9. NEXT STEPS FOR THEIR SITUATION
+   What should they do RIGHT NOW? Be specific:
+   - "First, check your current sample rate in [file]"
+   - "Then, add this config to enable streaming"
+   - "Finally, test with a 30-second clip before scaling"
+
+10. SOURCES
+    Link to the 3-5 most helpful discussions/docs.
+
+--------------------------------------------------------------------------------
+STYLE REQUIREMENTS:
+--------------------------------------------------------------------------------
+- Tone: Sophisticated and elegant, but easy to understand. Confident.
+- Formatting: Use headers (##), bullet points, code blocks. Make it scannable.
+- Spacing: Generous whitespace between sections for visual breathing room.
+- Length: As long as needed. Don't truncate important details.
+- Code: ALWAYS include code examples if they exist in the results.
+
+--------------------------------------------------------------------------------
+DO NOT:
+--------------------------------------------------------------------------------
+- Show raw JSON to the user
+- Say "here are the search results" or "based on the search results"
+- Be wishy-washy - give clear recommendations
+- Skip code examples
+- Ignore high-scored answers (they represent community consensus)
+- Just parrot results - ADD YOUR OWN KNOWLEDGE
+
+================================================================================
+USER'S ORIGINAL QUESTION (THIS IS WHAT YOU MUST ANSWER):
+================================================================================
+"""
+
+                # Build the query context section - include original query prominently
+                user_orig_query = (
+                    getattr(params, "user_original_query", None) or "Not provided"
+                )
+
+                query_context = f"""
+*** USER'S EXACT QUESTION: {user_orig_query} ***
+
+Topic: {params.topic}
+Language: {params.language}
+Goal: {params.goal or "Not specified"}
+Current Setup: {params.current_setup or "Not specified"}
+
+IMPORTANT: Your response MUST directly answer the user's original question above.
+If the search results don't seem relevant to "{user_orig_query}", acknowledge that
+and provide what you know from your training instead.
+
+================================================================================
+SEARCH RESULTS DATA ({len(all_results)} results from {len(source_lists)} sources):
+================================================================================
+
+"""
+
+                # Build the JSON data part
+                raw_data = {
                     "query": {
+                        "user_original_query": user_orig_query,  # THE GROUND TRUTH
                         "topic": params.topic,
                         "language": params.language,
                         "goal": params.goal,
@@ -4955,9 +5815,13 @@ async def _community_search_impl(params) -> str:
                     },
                     "results": all_results,
                 }
-                result = json.dumps(
-                    raw_response, indent=2, ensure_ascii=False, default=str
+
+                json_data = json.dumps(
+                    raw_data, indent=2, ensure_ascii=False, default=str
                 )
+
+                # Combine: Instructions FIRST, then query context, then data
+                result = synthesis_preamble + query_context + json_data
 
             elif params.response_format == ResponseFormat.MARKDOWN:
                 result = render_masterclass_markdown(
@@ -4972,8 +5836,10 @@ async def _community_search_impl(params) -> str:
                 )
             else:
                 response = {
+                    "_STOP": "DO NOT SEARCH AGAIN. These results are SUFFICIENT. Synthesize them into an answer NOW.",
                     "_instructions": {
-                        "how_to_use": "This response contains community-sourced solutions. Review findings by quality score, check conflicts for edge cases, and follow recommended_path for implementation.",
+                        "CRITICAL": "DO NOT call community_search, comparative_search, or any search tool again. USE THESE RESULTS.",
+                        "how_to_use": "Synthesize these findings into a helpful response. Do NOT say 'let me search for more'.",
                         "quality_scores": {
                             "80-100": "Highly reliable - maintainer-backed, well-evidenced, recent",
                             "60-79": "Good quality - community-validated, has code examples",

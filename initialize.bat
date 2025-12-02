@@ -32,7 +32,7 @@ echo Python found!
 echo.
 echo [2/4] Installing dependencies...
 %PYTHON_CMD% -m pip install -q --upgrade pip
-%PYTHON_CMD% -m pip install -r requirements.txt
+%PYTHON_CMD% -m pip install -e .
 if %errorlevel% neq 0 (
     echo ERROR: Failed to install dependencies
     pause

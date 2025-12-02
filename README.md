@@ -88,6 +88,14 @@ The MCP taps into developer communities and surfaces ranked solutions with quali
 
 <br>
 
+### Recommended Model
+
+> **Use Claude Haiku 3.5, NOT Opus 4.5**
+>
+> Opus 4.5 tends to ignore MCP instructions, rephrase your queries into something you didn't ask, and search for tangential topics instead of using the results it got. Haiku 3.5 follows the MCP's guidance much more reliably.
+
+<br>
+
 ---
 
 <br>
