@@ -44,37 +44,12 @@ DEFAULT_FORUM = "https://meta.discourse.org"
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-async def search(
+async def _search_single_forum(
     query: str,
-    language: Optional[str] = None,
-    *,
-    forum_url: Optional[str] = None,
+    base_url: str,
     max_results: int = 10,
 ) -> list[dict[str, Any]]:
-    """
-    Search Discourse forums for discussions.
-
-    Args:
-        query: Search query string
-        language: Programming language to select forum
-        forum_url: Direct forum URL (overrides language selection)
-        max_results: Maximum results to return
-
-    Returns:
-        List of topics with title, url, views, replies, likes
-
-    Example:
-        >>> results = await search("async await", language="rust")
-        >>> results = await search("deployment", forum_url="https://discuss.kubernetes.io")
-    """
-    # Select forum
-    if forum_url:
-        base_url = forum_url.rstrip("/")
-    elif language:
-        base_url = FORUMS.get(language.lower(), DEFAULT_FORUM)
-    else:
-        base_url = DEFAULT_FORUM
-
+    """Search a single Discourse forum."""
     try:
         async with httpx.AsyncClient(timeout=API_TIMEOUT) as client:
             response = await client.get(
@@ -101,6 +76,97 @@ async def search(
     except Exception as e:
         logger.warning(f"Search failed on {base_url}: {e}")
         return []
+
+
+async def search(
+    query: str,
+    language: Optional[str] = None,
+    *,
+    forum_url: Optional[str] = None,
+    max_results: int = 10,
+    search_multiple: bool = True,
+) -> list[dict[str, Any]]:
+    """
+    Search Discourse forums for discussions.
+
+    Args:
+        query: Search query string
+        language: Programming language to prioritize (but searches others too)
+        forum_url: Direct forum URL (overrides language selection)
+        max_results: Maximum results to return per forum
+        search_multiple: If True, search multiple relevant forums concurrently
+
+    Returns:
+        List of topics with title, url, views, replies, likes
+
+    Example:
+        >>> results = await search("async await", language="rust")
+        >>> results = await search("deployment", forum_url="https://discuss.kubernetes.io")
+    """
+    import asyncio
+
+    # If specific forum URL provided, only search that one
+    if forum_url:
+        return await _search_single_forum(query, forum_url.rstrip("/"), max_results)
+
+    # Determine which forums to search
+    forums_to_search: list[str] = []
+
+    if language:
+        # Prioritize the language-specific forum if it exists
+        lang_lower = language.lower()
+        if lang_lower in FORUMS:
+            forums_to_search.append(FORUMS[lang_lower])
+
+        # Add related forums based on language ecosystem
+        related_forums = {
+            "python": ["pytorch"],  # Python users often use PyTorch
+            "javascript": ["ember"],
+            "typescript": ["ember"],
+            "rust": [],
+            "go": ["kubernetes", "terraform"],  # Go is common in DevOps
+            "java": ["kubernetes"],
+        }
+        for related in related_forums.get(lang_lower, []):
+            if related in FORUMS and FORUMS[related] not in forums_to_search:
+                forums_to_search.append(FORUMS[related])
+
+    # If no language match or search_multiple, add high-traffic general forums
+    if search_multiple and len(forums_to_search) < 3:
+        priority_forums = ["python", "pytorch", "kubernetes", "rust"]
+        for forum_key in priority_forums:
+            if forum_key in FORUMS and FORUMS[forum_key] not in forums_to_search:
+                forums_to_search.append(FORUMS[forum_key])
+                if len(forums_to_search) >= 4:
+                    break
+
+    # Fallback if still empty
+    if not forums_to_search:
+        forums_to_search = [DEFAULT_FORUM]
+
+    # Search all selected forums concurrently
+    tasks = [
+        _search_single_forum(query, forum_url, max_results // len(forums_to_search) + 2)
+        for forum_url in forums_to_search
+    ]
+
+    results_list = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Combine results from all forums
+    all_results: list[dict[str, Any]] = []
+    for result in results_list:
+        if isinstance(result, list):
+            all_results.extend(result)
+
+    # Sort by engagement (views + replies + likes)
+    all_results.sort(
+        key=lambda x: x.get("views", 0)
+        + x.get("replies", 0) * 10
+        + x.get("likes", 0) * 5,
+        reverse=True,
+    )
+
+    return all_results[:max_results]
 
 
 # ══════════════════════════════════════════════════════════════════════════════

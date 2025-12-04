@@ -134,18 +134,21 @@ async def search(
     accepted_only: bool = False,
     min_answers: int = 0,
     max_results: int = 15,
+    require_tag: bool = False,
 ) -> list[dict[str, Any]]:
     """
     Search a Stack Exchange site.
 
     Args:
         query: Search query string
-        language: Programming language/technology to filter by
+        language: Programming language/technology to include in search
         site: Site key (default: stackoverflow). See SITES for options.
         sort: Sort by 'relevance', 'votes', 'creation', or 'activity'
         accepted_only: Only questions with accepted answers
         min_answers: Minimum answer count required
         max_results: Maximum results to return (max 100)
+        require_tag: If True, only return results with exact tag match.
+                     If False (default), include language in query text instead.
 
     Returns:
         List of question results with title, url, score, answers, snippet
@@ -159,17 +162,27 @@ async def search(
         logger.warning(f"Unknown site '{site}', using stackoverflow")
         site = "stackoverflow"
 
+    # Build search query - include language in query text for better results
+    search_query = query
+    if language and not require_tag:
+        # Add language to query for broader matching (not just tagged questions)
+        lang_term = LANGUAGE_TAGS.get(language.lower(), language.lower())
+        # Only add if not already in query
+        if lang_term.lower() not in query.lower():
+            search_query = f"{lang_term} {query}"
+
     # Build request
     params: dict[str, Any] = {
         "order": "desc",
         "sort": sort,
-        "q": query,
+        "q": search_query,
         "site": site,
         "filter": "withbody",
         "pagesize": min(max_results, 100),
     }
 
-    if language:
+    # Only use tagged filter if explicitly requested
+    if language and require_tag:
         params["tagged"] = LANGUAGE_TAGS.get(language.lower(), language.lower())
     if accepted_only:
         params["accepted"] = "True"

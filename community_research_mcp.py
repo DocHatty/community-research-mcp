@@ -10,18 +10,18 @@ import asyncio
 import logging
 import os
 import time
-from datetime import datetime
-from typing import Any, Dict, List, Optional
+from collections.abc import Coroutine
+from typing import Any
 
 import httpx
 from mcp.server.fastmcp import FastMCP
-from pydantic import BaseModel, Field
+from mcp.types import ToolAnnotations
 
 # Load environment variables
 try:
     from dotenv import load_dotenv
 
-    load_dotenv()
+    _ = load_dotenv()
 except ImportError:
     pass
 
@@ -41,8 +41,6 @@ from api import (
 # Import core utilities
 from core import (
     deduplicate_results,
-    get_circuit_breaker,
-    resilient_api_call,
 )
 
 # Set up logging
@@ -67,7 +65,7 @@ API_TIMEOUT = 60.0
 # =============================================================================
 
 
-async def search_reddit(query: str, language: str) -> List[Dict[str, Any]]:
+async def search_reddit(query: str, language: str) -> list[dict[str, str | int]]:
     """Search Reddit programming subreddits."""
     subreddit_map = {
         "python": "python+learnpython+django+flask",
@@ -88,20 +86,27 @@ async def search_reddit(query: str, language: str) -> List[Dict[str, Any]]:
     try:
         async with httpx.AsyncClient(timeout=API_TIMEOUT) as client:
             response = await client.get(url, params=params, headers=headers)
-            response.raise_for_status()
-            data = response.json()
+            _ = response.raise_for_status()
+            data: dict[str, Any] = response.json()
 
-            results = []
-            for item in data.get("data", {}).get("children", []):
-                post = item.get("data", {})
+            results: list[dict[str, str | int]] = []
+            children: list[dict[str, Any]] = data.get("data", {}).get("children", [])
+            for item in children:
+                post: dict[str, Any] = item.get("data", {})
+                title: str = post.get("title", "")
+                permalink: str = post.get("permalink", "")
+                score: int = post.get("score", 0)
+                num_comments: int = post.get("num_comments", 0)
+                selftext: str = post.get("selftext", "") or ""
+                subreddit: str = post.get("subreddit", "")
                 results.append(
                     {
-                        "title": post.get("title", ""),
-                        "url": f"https://www.reddit.com{post.get('permalink', '')}",
-                        "score": post.get("score", 0),
-                        "comments": post.get("num_comments", 0),
-                        "snippet": (post.get("selftext", "") or "")[:500],
-                        "subreddit": post.get("subreddit", ""),
+                        "title": title,
+                        "url": f"https://www.reddit.com{permalink}",
+                        "score": score,
+                        "comments": num_comments,
+                        "snippet": selftext[:500],
+                        "subreddit": subreddit,
                     }
                 )
             return results
@@ -119,17 +124,20 @@ async def aggregate_search(
     query: str,
     language: str,
     max_results_per_source: int = 15,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Search all available sources in parallel."""
 
-    async def safe_search(name: str, coro):
+    async def safe_search(
+        name: str, coro: Coroutine[Any, Any, list[dict[str, Any]]]
+    ) -> tuple[str, list[dict[str, Any]], float, str | None]:
         """Wrap search in error handling."""
         start = time.time()
         try:
-            circuit = get_circuit_breaker(name)
-            results = await circuit.call_async(resilient_api_call, coro)
+            # Directly await the coroutine with error handling
+            results = await coro
             return name, results or [], time.time() - start, None
         except Exception as e:
+            logger.warning(f"{name} search failed: {e}")
             return name, [], time.time() - start, str(e)
 
     # Build search tasks for all sources
@@ -156,8 +164,8 @@ async def aggregate_search(
     results_list = await asyncio.gather(*tasks)
 
     # Aggregate results
-    all_results: Dict[str, List] = {}
-    audit_log = []
+    all_results: dict[str, list[dict[str, Any]]] = {}
+    audit_log: list[dict[str, Any]] = []
 
     for name, results, duration, error in results_list:
         # Cap results per source
@@ -188,16 +196,16 @@ async def aggregate_search(
 
 @mcp.tool(
     name="community_search",
-    annotations={
-        "title": "Search Developer Communities",
-        "readOnlyHint": True,
-    },
+    annotations=ToolAnnotations(
+        title="Search Developer Communities",
+        readOnlyHint=True,
+    ),
 )
 async def community_search(
     query: str,
     language: str = "python",
     max_results: int = 15,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Search developer communities for real-world solutions.
 

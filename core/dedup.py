@@ -79,14 +79,31 @@ def deduplicate_results(
                 if fingerprint:
                     content_fingerprints[fingerprint] = key
 
-    # Rebuild results by source
+    # Rebuild results by source (normalize sub-sources to base source)
     deduped: dict[str, list[dict[str, Any]]] = {s: [] for s in results}
     for key, item in best_by_key.items():
         source = key_to_source.get(key, item.get("source", "unknown"))
-        if source in deduped:
+
+        # Normalize sub-sources to base source (e.g., "discourse:python.org" -> "discourse")
+        base_source = source.split(":")[0] if ":" in source else source
+
+        # Map to original source keys
+        if base_source in deduped:
+            deduped[base_source].append(item)
+        elif source in deduped:
             deduped[source].append(item)
         else:
-            deduped.setdefault(source, []).append(item)
+            # Try to find a matching base source in the original results
+            matched = False
+            for orig_source in results.keys():
+                if orig_source.startswith(base_source) or base_source.startswith(
+                    orig_source.split(":")[0]
+                ):
+                    deduped[orig_source].append(item)
+                    matched = True
+                    break
+            if not matched:
+                deduped.setdefault(base_source, []).append(item)
 
     # Log stats
     original = sum(len(items) for items in results.values())

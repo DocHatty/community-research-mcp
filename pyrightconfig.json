@@ -1,0 +1,9 @@
+{
+  "pythonVersion": "3.10",
+  "pythonPlatform": "Windows",
+  "venvPath": "H:/Programming",
+  "venv": "Python",
+  "reportMissingImports": false,
+  "reportAny": false,
+  "reportExplicitAny": false
+}
