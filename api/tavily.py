@@ -36,7 +36,7 @@ async def search(
     query: str,
     language: Optional[str] = None,
     *,
-    max_results: int = 10,
+    max_results: int = 20,
     search_depth: str = "basic",
     include_answer: bool = False,
     include_domains: Optional[list[str]] = None,
@@ -131,7 +131,7 @@ async def search_news(
     query: str,
     language: Optional[str] = None,
     *,
-    max_results: int = 10,
+    max_results: int = 20,
     days: int = 7,
 ) -> list[dict[str, Any]]:
     """

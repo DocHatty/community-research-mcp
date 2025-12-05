@@ -53,8 +53,37 @@ TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 BRAVE_SEARCH_API_KEY = os.getenv("BRAVE_SEARCH_API_KEY")
 SERPER_API_KEY = os.getenv("SERPER_API_KEY")
 
-# Initialize MCP server
-mcp = FastMCP("community_research_mcp")
+# Initialize MCP server with instructions for LLMs
+INSTRUCTIONS = """
+Community Research MCP - Search developer communities for real-world solutions.
+
+WHEN TO USE: Debugging errors, best practices, library comparisons, migration paths,
+performance issues, edge cases, "has anyone done X?", integration patterns, version-specific bugs.
+
+QUERY TIPS:
+- Include exact error messages in quotes
+- Combine technology stack: "FastAPI SQLAlchemy async session"
+- Add version numbers: "Next.js 14 app router"
+- Use comparison format: "Redis vs RabbitMQ Python comparison"
+
+SOURCE PRIORITY:
+- Bug fixes: Stack Overflow > GitHub Issues > Reddit
+- Performance: GitHub Issues > HackerNews > Stack Overflow
+- Architecture: HackerNews > Lobsters > Discourse
+- Comparisons: Reddit > HackerNews > Stack Overflow
+
+INTERPRETING RESULTS:
+- High votes + accepted answer = trusted solution
+- Closed GitHub issues with comments = problem solved
+- Check result dates - older solutions may be outdated
+- Synthesize across sources for consensus
+
+POWER KEYWORDS: "solved", "fixed", "workaround", "production", "2024", "2025"
+
+Always set the language parameter appropriately (python, javascript, typescript, rust, go, etc).
+"""
+
+mcp = FastMCP("community_research_mcp", instructions=INSTRUCTIONS)
 
 # Constants
 API_TIMEOUT = 60.0
@@ -80,7 +109,7 @@ async def search_reddit(query: str, language: str) -> list[dict[str, str | int]]
 
     subreddit = subreddit_map.get(language.lower(), "programming+webdev")
     url = f"https://www.reddit.com/r/{subreddit}/search.json"
-    params = {"q": query, "sort": "relevance", "limit": 15, "restrict_sr": "on"}
+    params = {"q": query, "sort": "relevance", "limit": 50, "restrict_sr": "on"}
     headers = {"User-Agent": "CommunityResearchMCP/1.0"}
 
     try:
@@ -123,7 +152,7 @@ async def search_reddit(query: str, language: str) -> list[dict[str, str | int]]
 async def aggregate_search(
     query: str,
     language: str,
-    max_results_per_source: int = 15,
+    max_results_per_source: int = 25,
 ) -> dict[str, Any]:
     """Search all available sources in parallel."""
 
@@ -170,14 +199,14 @@ async def aggregate_search(
     for name, results, duration, error in results_list:
         # Cap results per source
         all_results[name] = results[:max_results_per_source]
-        audit_log.append(
-            {
-                "source": name,
-                "count": len(results),
-                "duration_ms": round(duration * 1000, 2),
-                "error": error,
-            }
-        )
+        entry = {
+            "source": name,
+            "count": len(results),
+            "duration_ms": round(duration * 1000, 2),
+        }
+        if error:
+            entry["error"] = error
+        audit_log.append(entry)
 
     # Deduplicate across sources
     deduped = deduplicate_results(all_results)
@@ -204,7 +233,7 @@ async def aggregate_search(
 async def community_search(
     query: str,
     language: str = "python",
-    max_results: int = 15,
+    max_results: int = 25,
 ) -> dict[str, Any]:
     """
     Search developer communities for real-world solutions.
@@ -215,7 +244,7 @@ async def community_search(
     Args:
         query: What to search for (be specific!)
         language: Programming language context (default: python)
-        max_results: Max results per source (default: 15)
+        max_results: Max results per source (default: 25, max: 50)
 
     Returns:
         Results from all sources with titles, URLs, scores, and snippets
@@ -228,7 +257,7 @@ async def community_search(
     search_results = await aggregate_search(
         query=query.strip(),
         language=language,
-        max_results_per_source=min(max_results, 25),
+        max_results_per_source=min(max_results, 50),
     )
 
     return {

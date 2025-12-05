@@ -35,7 +35,7 @@ async def search(
     query: str,
     language: Optional[str] = None,
     *,
-    max_results: int = 10,
+    max_results: int = 20,
     freshness: Optional[str] = None,
     country: str = "us",
 ) -> list[dict[str, Any]]:
@@ -137,7 +137,7 @@ async def search_news(
     query: str,
     language: Optional[str] = None,
     *,
-    max_results: int = 10,
+    max_results: int = 20,
     freshness: Optional[str] = None,
 ) -> list[dict[str, Any]]:
     """

@@ -133,7 +133,7 @@ async def search(
     sort: str = "relevance",
     accepted_only: bool = False,
     min_answers: int = 0,
-    max_results: int = 15,
+    max_results: int = 30,
     require_tag: bool = False,
 ) -> list[dict[str, Any]]:
     """

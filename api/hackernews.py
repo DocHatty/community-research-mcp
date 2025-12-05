@@ -160,7 +160,7 @@ async def search(
     query: str,
     *,
     min_points: int = 5,
-    max_results: int = 15,
+    max_results: int = 30,
     search_type: str = "story",
     simplify: bool = True,
 ) -> list[dict[str, Any]]:

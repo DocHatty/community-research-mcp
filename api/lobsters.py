@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 async def search(
     query: str,
     *,
-    max_results: int = 10,
+    max_results: int = 25,
 ) -> list[dict[str, Any]]:
     """
     Search Lobsters for technical discussions.

@@ -69,7 +69,7 @@ async def search(
     query: str,
     language: Optional[str] = None,
     *,
-    max_results: int = 15,
+    max_results: int = 30,
 ) -> list[dict[str, Any]]:
     """
     Search GitHub issues and discussions.

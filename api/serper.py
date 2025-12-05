@@ -35,7 +35,7 @@ async def search(
     query: str,
     language: Optional[str] = None,
     *,
-    max_results: int = 10,
+    max_results: int = 30,
     country: str = "us",
     locale: str = "en",
 ) -> list[dict[str, Any]]:
@@ -135,7 +135,7 @@ async def search_news(
     query: str,
     language: Optional[str] = None,
     *,
-    max_results: int = 10,
+    max_results: int = 30,
 ) -> list[dict[str, Any]]:
     """
     Search Google News via Serper.

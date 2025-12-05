@@ -47,7 +47,7 @@ DEFAULT_FORUM = "https://meta.discourse.org"
 async def _search_single_forum(
     query: str,
     base_url: str,
-    max_results: int = 10,
+    max_results: int = 20,
 ) -> list[dict[str, Any]]:
     """Search a single Discourse forum."""
     try:
@@ -83,7 +83,7 @@ async def search(
     language: Optional[str] = None,
     *,
     forum_url: Optional[str] = None,
-    max_results: int = 10,
+    max_results: int = 20,
     search_multiple: bool = True,
 ) -> list[dict[str, Any]]:
     """
